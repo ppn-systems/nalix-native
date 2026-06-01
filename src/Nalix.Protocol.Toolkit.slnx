@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Nalix.Protocol.Toolkit.Abstractions/Nalix.Protocol.Toolkit.Abstractions.csproj" />
+  <Project Path="Nalix.Protocol.Toolkit.Cli/Nalix.Protocol.Toolkit.Cli.csproj" />
+  <Project Path="Nalix.Protocol.Toolkit.Roslyn/Nalix.Protocol.Toolkit.Roslyn.csproj" Id="01514dea-44c4-46b3-80d1-96baa132a09c" />
+</Solution>

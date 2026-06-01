@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	  <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nalix.Protocol.Toolkit.Abstractions\Nalix.Protocol.Toolkit.Abstractions.csproj" />
+    <ProjectReference Include="..\Nalix.Protocol.Toolkit.Roslyn\Nalix.Protocol.Toolkit.Roslyn.csproj" />
+  </ItemGroup>
+
+</Project>
