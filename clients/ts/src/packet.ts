@@ -3,6 +3,17 @@ import { NalixStatus, StatusCode } from './status.js';
 export const NALIX_HEADER_SIZE = 6;
 
 /**
+ * Bitwise flags that describe the state or properties of a network packet.
+ * Matches Nalix.Abstractions.Networking.Packets.PacketFlags.
+ */
+export enum PacketFlags {
+  NONE = 0x00,
+  COMPRESSED = 1 << 1, // 0x02
+  ENCRYPTED = 1 << 2,   // 0x04
+  FRAGMENTED = 1 << 3,  // 0x08
+}
+
+/**
  * Nalix v14 6-byte wire protocol header.
  * Byte Layout (Little-Endian):
  *   [0..1]: OpCode (uint16)

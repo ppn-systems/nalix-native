@@ -20,7 +20,12 @@
   "author": "PPN Systems",
   "license": "Apache-2.0",
   "devDependencies": {
+    "@types/lz4js": "^0.2.2",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "lz4js": "^0.2.0"
   }
 }

@@ -2,4 +2,8 @@ export * from './status.js';
 export * from './packet.js';
 export * from './protocol.js';
 export * from './channel.js';
+export * from './security.js';
+export * from './compression.js';
+export * from './state.js';
+export * from './pipeline.js';
 export * from './session.js';

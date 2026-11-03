@@ -2,6 +2,8 @@ import { ChannelConfig, ChannelConfigOptions, ConnectivityState } from './channe
 import { Packet, PacketCreateOptions, PayloadLike } from './packet.js';
 import { ControlType, ProtocolOpCode } from './protocol.js';
 import { NalixStatus, StatusCode } from './status.js';
+import { SessionState } from './state.js';
+import { FramePipeline } from './pipeline.js';
 
 export type PacketCallback = (packet: Packet) => void;
 export type StateCallback = (state: ConnectivityState) => void;
@@ -46,6 +48,8 @@ export class WebSocketSession {
   private _reconnectAttempts: number = 0;
   private _intentionalClose: boolean = false;
   private _heartbeatTimer: any = null;
+  private readonly _sessionState: SessionState = new SessionState();
+  private _outboundSeq32: number = 0;
 
   constructor(options: ChannelConfig | WebSocketSessionOptions | string) {
     if (options instanceof ChannelConfig) {
@@ -61,6 +65,40 @@ export class WebSocketSession {
 
   public get isConnected(): boolean {
     return this._state === ConnectivityState.READY && this._ws?.readyState === WebSocket.OPEN;
+  }
+
+  public get sessionState(): SessionState {
+    return this._sessionState;
+  }
+
+  public setSecret(secret: Uint8Array): void {
+    this._sessionState.secret = secret;
+    this._sessionState.encryptionEnabled = true;
+  }
+
+  public enableEncryption(secret?: Uint8Array): void {
+    if (secret) {
+      this._sessionState.secret = secret;
+    }
+    if (!this._sessionState.secret) {
+      throw new NalixStatus(StatusCode.FAILED_PRECONDITION, 'Cannot enable encryption without a secret key');
+    }
+    this._sessionState.encryptionEnabled = true;
+  }
+
+  public disableEncryption(): void {
+    this._sessionState.encryptionEnabled = false;
+  }
+
+  /**
+   * Generates a 32-bit sequence number (1..4294967295) for AEAD envelope headers.
+   */
+  public nextSeq32(): number {
+    this._outboundSeq32 = (this._outboundSeq32 + 1) >>> 0;
+    if (this._outboundSeq32 === 0) {
+      this._outboundSeq32 = 1;
+    }
+    return this._outboundSeq32;
   }
 
   /**
@@ -228,7 +266,8 @@ export class WebSocketSession {
               return;
             }
 
-            const packet = Packet.decode(buffer);
+            const rawPacket = Packet.decode(buffer);
+            const packet = FramePipeline.processInbound(rawPacket, this._sessionState);
             this.dispatchInboundPacket(packet);
           } catch {
             // Malformed packet
@@ -296,17 +335,22 @@ export class WebSocketSession {
     let packet: Packet;
     if (packetOrOpcode instanceof Packet) {
       packet = packetOrOpcode;
-      if (packet.header.sequenceId === 0) {
-        packet.header.sequenceId = this.nextSequenceId();
-      }
     } else {
-      const seq = options?.sequenceId ?? this.nextSequenceId();
+      const seq = options?.sequenceId ?? 0;
       packet = Packet.create(packetOrOpcode, payload, { ...options, sequenceId: seq });
     }
 
-    const bytes = packet.encode();
+    const processed = FramePipeline.processOutbound(
+      packet,
+      this.config,
+      this._sessionState,
+      () => this.nextSequenceId(),
+      () => this.nextSeq32()
+    );
+
+    const bytes = processed.encode();
     this._ws.send(bytes);
-    return packet.header.sequenceId;
+    return processed.header.sequenceId;
   }
 
   /**
@@ -378,7 +422,14 @@ export class WebSocketSession {
       this._pendingWaiters.add(waiter);
 
       try {
-        const bytes = packet.encode();
+        const processed = FramePipeline.processOutbound(
+          packet,
+          this.config,
+          this._sessionState,
+          () => this.nextSequenceId(),
+          () => this.nextSeq32()
+        );
+        const bytes = processed.encode();
         this._ws!.send(bytes);
       } catch (err: any) {
         clearTimeout(timer);

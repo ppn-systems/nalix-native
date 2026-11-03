@@ -1,3 +1,5 @@
+import { CipherSuiteType } from './security.js';
+
 /**
  * Connectivity states representing the channel lifecycle.
  */
@@ -26,6 +28,9 @@ export interface ChannelConfigOptions {
   reconnectIntervalMs?: number;
   maxReconnectAttempts?: number;
   heartbeatIntervalMs?: number;
+  compressionEnabled?: boolean;
+  compressionThreshold?: number;
+  algorithm?: CipherSuiteType;
 }
 
 export class ChannelConfig {
@@ -41,6 +46,9 @@ export class ChannelConfig {
   public readonly reconnectIntervalMs: number;
   public readonly maxReconnectAttempts: number;
   public readonly heartbeatIntervalMs: number;
+  public readonly compressionEnabled: boolean;
+  public readonly compressionThreshold: number;
+  public readonly algorithm: CipherSuiteType;
   private readonly _overrideUrl?: string;
 
   constructor(options: ChannelConfigOptions | string) {
@@ -66,6 +74,9 @@ export class ChannelConfig {
       this.reconnectIntervalMs = 2000;
       this.maxReconnectAttempts = 5;
       this.heartbeatIntervalMs = 0;
+      this.compressionEnabled = true;
+      this.compressionThreshold = 512;
+      this.algorithm = CipherSuiteType.Chacha20Poly1305;
     } else {
       if (options.url) {
         this._overrideUrl = options.url;
@@ -96,6 +107,9 @@ export class ChannelConfig {
       this.reconnectIntervalMs = options.reconnectIntervalMs ?? 2000;
       this.maxReconnectAttempts = options.maxReconnectAttempts ?? 5;
       this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 0;
+      this.compressionEnabled = options.compressionEnabled ?? true;
+      this.compressionThreshold = options.compressionThreshold ?? 512;
+      this.algorithm = options.algorithm ?? CipherSuiteType.Chacha20Poly1305;
     }
   }
 
