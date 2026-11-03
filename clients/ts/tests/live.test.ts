@@ -1,35 +1,49 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ChannelConfig, NalixClient, Packet, PacketHeader, ConnectivityState } from '../src/index.js';
+import {
+  WebSocketSession,
+  Packet,
+  PacketHeader,
+  ConnectivityState,
+  ProtocolOpCode,
+} from '../src/index.js';
 
-test('Live WebSocket connection to atmosos.eyc.asia:443', async () => {
-  const config = new ChannelConfig({
-    host: 'atmosos.eyc.asia',
-    port: 443,
-    path: '/ws/',
-    useTls: true,
-    subprotocol: 'nalix.v1',
-    connectTimeoutMs: 10000,
-  });
+test('Live WebSocket session to atmosos.eyc.asia:443 with ergonomic APIs', async () => {
+  // Construct WebSocketSession directly from URL string
+  const session = new WebSocketSession('wss://atmosos.eyc.asia/ws/');
+  assert.equal(session.state, ConnectivityState.IDLE);
 
-  const client = new NalixClient(config);
-  assert.equal(client.state, ConnectivityState.IDLE);
+  // Register state change listener
+  const states: ConnectivityState[] = [];
+  const stateSub = session.onStateChange((s) => states.push(s));
 
   // Connect live
-  await client.connect();
-  assert.equal(client.isConnected, true);
-  assert.equal(client.state, ConnectivityState.READY);
+  await session.connect();
+  assert.equal(session.isConnected, true);
+  assert.equal(session.state, ConnectivityState.READY);
 
-  // Send binary SessionInit packet (OpCode: 0x0000, Flags: 0x04, Priority: 0x03, Sequence: 0x0000, 64-byte payload)
-  const header = new PacketHeader(0x0000, 0x04, 0x03, 0x0000);
+  // Register an OpCode subscription (matching C# session.On<T>)
+  let receivedSessionSignal = false;
+  const sub = session.on(ProtocolOpCode.SESSION_SIGNAL, (_packet) => {
+    receivedSessionSignal = true;
+  });
+
+  // Shorthand send with random 64-byte payload (SessionInit)
   const payload = new Uint8Array(64);
   crypto.getRandomValues(payload);
 
-  const initPacket = new Packet(header, payload);
-  client.send(initPacket);
+  const seqId = session.send(ProtocolOpCode.SESSION_INIT, payload, {
+    flags: 0x04,
+    priority: 0x03,
+  });
+  assert.ok(seqId > 0, 'SequenceId should be auto-assigned');
 
-  // Clean disconnect
-  client.disconnect();
-  assert.equal(client.state, ConnectivityState.SHUTDOWN);
-  assert.equal(client.isConnected, false);
+  // Unsubscribe listener
+  sub.unsubscribe();
+  stateSub.unsubscribe();
+
+  // Clean close
+  session.close();
+  assert.equal(session.state, ConnectivityState.SHUTDOWN);
+  assert.equal(session.isConnected, false);
 });

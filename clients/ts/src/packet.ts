@@ -48,6 +48,14 @@ export class PacketHeader {
   }
 }
 
+export type PayloadLike = Uint8Array | ArrayBuffer | string | null | undefined;
+
+export interface PacketCreateOptions {
+  flags?: number;
+  priority?: number;
+  sequenceId?: number;
+}
+
 /**
  * A Nalix protocol packet composed of a 6-byte header and a binary payload.
  */
@@ -60,6 +68,24 @@ export class Packet {
     this.payload = payload;
   }
 
+  /**
+   * Helper to decode payload bytes as a UTF-8 string.
+   */
+  public text(): string {
+    return new TextDecoder().decode(this.payload);
+  }
+
+  /**
+   * Helper to parse payload bytes as JSON.
+   */
+  public json<T = any>(): T {
+    const str = this.text();
+    return JSON.parse(str) as T;
+  }
+
+  /**
+   * Encodes the packet into wire format (6-byte header + binary payload).
+   */
   public encode(): Uint8Array {
     const totalLength = NALIX_HEADER_SIZE + this.payload.length;
     const buffer = new Uint8Array(totalLength);
@@ -70,10 +96,47 @@ export class Packet {
     return buffer;
   }
 
+  /**
+   * Decodes a binary buffer into a Nalix Packet.
+   */
   public static decode(raw: Uint8Array | ArrayBuffer): Packet {
     const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
     const header = PacketHeader.decode(bytes, 0);
     const payload = bytes.subarray(NALIX_HEADER_SIZE);
     return new Packet(header, payload);
+  }
+
+  /**
+   * High-level factory method to create a Packet without manual header instantiation.
+   */
+  public static create(opcode: number, payload?: PayloadLike, options?: PacketCreateOptions): Packet {
+    let body: Uint8Array;
+    if (!payload) {
+      body = new Uint8Array(0);
+    } else if (typeof payload === 'string') {
+      body = new TextEncoder().encode(payload);
+    } else if (payload instanceof Uint8Array) {
+      body = payload;
+    } else if (payload instanceof ArrayBuffer) {
+      body = new Uint8Array(payload);
+    } else {
+      body = new Uint8Array(0);
+    }
+
+    const header = new PacketHeader(
+      opcode,
+      options?.flags ?? 0,
+      options?.priority ?? 0,
+      options?.sequenceId ?? 0
+    );
+    return new Packet(header, body);
+  }
+
+  /**
+   * Factory method to create a Packet with a JSON-serialized payload.
+   */
+  public static fromJson(opcode: number, obj: any, options?: PacketCreateOptions): Packet {
+    const jsonStr = JSON.stringify(obj);
+    return Packet.create(opcode, jsonStr, options);
   }
 }

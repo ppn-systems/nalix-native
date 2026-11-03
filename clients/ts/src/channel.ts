@@ -13,13 +13,19 @@ export enum ConnectivityState {
  * Configuration options for establishing a Nalix WebSocket channel.
  */
 export interface ChannelConfigOptions {
-  host: string;
+  url?: string;
+  host?: string;
   port?: number;
   path?: string;
   useTls?: boolean;
   subprotocol?: string;
   connectTimeoutMs?: number;
+  requestTimeoutMs?: number;
   maxMessageSize?: number;
+  autoReconnect?: boolean;
+  reconnectIntervalMs?: number;
+  maxReconnectAttempts?: number;
+  heartbeatIntervalMs?: number;
 }
 
 export class ChannelConfig {
@@ -29,19 +35,74 @@ export class ChannelConfig {
   public readonly useTls: boolean;
   public readonly subprotocol: string;
   public readonly connectTimeoutMs: number;
+  public readonly requestTimeoutMs: number;
   public readonly maxMessageSize: number;
+  public readonly autoReconnect: boolean;
+  public readonly reconnectIntervalMs: number;
+  public readonly maxReconnectAttempts: number;
+  public readonly heartbeatIntervalMs: number;
+  private readonly _overrideUrl?: string;
 
-  constructor(options: ChannelConfigOptions) {
-    this.host = options.host;
-    this.useTls = options.useTls ?? true;
-    this.port = options.port ?? (this.useTls ? 443 : 80);
-    this.path = options.path ? (options.path.startsWith('/') ? options.path : `/${options.path}`) : '/ws/';
-    this.subprotocol = options.subprotocol ?? 'nalix.v1';
-    this.connectTimeoutMs = options.connectTimeoutMs ?? 10000;
-    this.maxMessageSize = options.maxMessageSize ?? 65536;
+  constructor(options: ChannelConfigOptions | string) {
+    if (typeof options === 'string') {
+      this._overrideUrl = options;
+      try {
+        const parsed = new URL(options);
+        this.useTls = parsed.protocol === 'wss:' || parsed.protocol === 'https:';
+        this.host = parsed.hostname;
+        this.port = parsed.port ? parseInt(parsed.port, 10) : (this.useTls ? 443 : 80);
+        this.path = parsed.pathname || '/ws/';
+      } catch {
+        this.useTls = true;
+        this.host = options;
+        this.port = 443;
+        this.path = '/ws/';
+      }
+      this.subprotocol = 'nalix.v1';
+      this.connectTimeoutMs = 10000;
+      this.requestTimeoutMs = 5000;
+      this.maxMessageSize = 65536;
+      this.autoReconnect = false;
+      this.reconnectIntervalMs = 2000;
+      this.maxReconnectAttempts = 5;
+      this.heartbeatIntervalMs = 0;
+    } else {
+      if (options.url) {
+        this._overrideUrl = options.url;
+        try {
+          const parsed = new URL(options.url);
+          this.useTls = options.useTls ?? (parsed.protocol === 'wss:' || parsed.protocol === 'https:');
+          this.host = options.host ?? parsed.hostname;
+          this.port = options.port ?? (parsed.port ? parseInt(parsed.port, 10) : (this.useTls ? 443 : 80));
+          this.path = options.path ?? (parsed.pathname || '/ws/');
+        } catch {
+          this.useTls = options.useTls ?? true;
+          this.host = options.host ?? 'localhost';
+          this.port = options.port ?? (this.useTls ? 443 : 80);
+          this.path = options.path ?? '/ws/';
+        }
+      } else {
+        this.host = options.host ?? 'localhost';
+        this.useTls = options.useTls ?? true;
+        this.port = options.port ?? (this.useTls ? 443 : 80);
+        this.path = options.path ? (options.path.startsWith('/') ? options.path : `/${options.path}`) : '/ws/';
+      }
+
+      this.subprotocol = options.subprotocol ?? 'nalix.v1';
+      this.connectTimeoutMs = options.connectTimeoutMs ?? 10000;
+      this.requestTimeoutMs = options.requestTimeoutMs ?? 5000;
+      this.maxMessageSize = options.maxMessageSize ?? 65536;
+      this.autoReconnect = options.autoReconnect ?? false;
+      this.reconnectIntervalMs = options.reconnectIntervalMs ?? 2000;
+      this.maxReconnectAttempts = options.maxReconnectAttempts ?? 5;
+      this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 0;
+    }
   }
 
   public get url(): string {
+    if (this._overrideUrl) {
+      return this._overrideUrl;
+    }
     const scheme = this.useTls ? 'wss' : 'ws';
     const isStandardPort = (this.useTls && this.port === 443) || (!this.useTls && this.port === 80);
     const hostPort = isStandardPort ? this.host : `${this.host}:${this.port}`;

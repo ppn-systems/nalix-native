@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Packet, PacketHeader, NALIX_HEADER_SIZE, NalixStatus, StatusCode } from '../src/index.js';
+import {
+  Packet,
+  PacketHeader,
+  NALIX_HEADER_SIZE,
+  NalixStatus,
+  StatusCode,
+  ChannelConfig,
+  ProtocolOpCode,
+  ControlType,
+} from '../src/index.js';
 
 test('Status codes and NalixStatus error class', () => {
   const ok = NalixStatus.ok();
@@ -49,4 +58,45 @@ test('Packet payload serialization and round-trip', () => {
   assert.equal(decoded.header.priority, 0x02);
   assert.equal(decoded.header.sequenceId, 0x0001);
   assert.deepEqual(decoded.payload, payload);
+});
+
+test('Packet.create with string and JSON payloads', () => {
+  // String payload
+  const strPacket = Packet.create(0x0100, 'hello nalix', { sequenceId: 42 });
+  assert.equal(strPacket.header.opcode, 0x0100);
+  assert.equal(strPacket.header.sequenceId, 42);
+  assert.equal(strPacket.text(), 'hello nalix');
+
+  // JSON payload
+  const sampleObj = { userId: 101, username: 'testuser' };
+  const jsonPacket = Packet.fromJson(0x0200, sampleObj, { sequenceId: 99 });
+  assert.equal(jsonPacket.header.opcode, 0x0200);
+  assert.equal(jsonPacket.header.sequenceId, 99);
+  assert.deepEqual(jsonPacket.json(), sampleObj);
+});
+
+test('ChannelConfig URL parsing and options', () => {
+  const config1 = new ChannelConfig('wss://atmosos.eyc.asia/ws/');
+  assert.equal(config1.host, 'atmosos.eyc.asia');
+  assert.equal(config1.port, 443);
+  assert.equal(config1.useTls, true);
+  assert.equal(config1.path, '/ws/');
+  assert.equal(config1.url, 'wss://atmosos.eyc.asia/ws/');
+
+  const config2 = new ChannelConfig({
+    host: '127.0.0.1',
+    port: 57200,
+    useTls: false,
+    path: '/gateway',
+    autoReconnect: true,
+  });
+  assert.equal(config2.url, 'ws://127.0.0.1:57200/gateway');
+  assert.equal(config2.autoReconnect, true);
+});
+
+test('ProtocolOpCode and ControlType definitions', () => {
+  assert.equal(ProtocolOpCode.SESSION_INIT, 0x0000);
+  assert.equal(ProtocolOpCode.SYSTEM_CONTROL, 0x0001);
+  assert.equal(ControlType.PING, 0x01);
+  assert.equal(ControlType.PONG, 0x02);
 });

@@ -65,9 +65,10 @@ impl Default for ChannelConfig {
 }
 
 impl ChannelConfig {
-    pub fn new(endpoint: impl Into<String>) -> Self {
+    pub fn new(endpoint: impl Into<String>, transport: TransportType) -> Self {
         Self {
             endpoint: endpoint.into(),
+            transport,
             ..Default::default()
         }
     }
@@ -80,19 +81,12 @@ impl ChannelConfig {
         }
     }
 
-    pub fn websocket(
-        host: impl Into<String>,
-        port: u16,
-        path: impl Into<String>,
-        use_tls: bool,
-        subprotocol: Option<impl Into<String>>,
-    ) -> Self {
-        let host_str = host.into();
+    pub fn websocket(endpoint: impl Into<String>, path: impl Into<String>, use_tls: bool) -> Self {
         Self {
-            endpoint: format!("{}:{}", host_str, port),
+            endpoint: endpoint.into(),
             transport: TransportType::WebSocket {
                 path: path.into(),
-                subprotocol: subprotocol.map(|s| s.into()),
+                subprotocol: Some("nalix.v1".to_string()),
                 use_tls,
             },
             ..Default::default()
