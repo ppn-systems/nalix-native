@@ -63,9 +63,11 @@ static void test_client_lifecycle(void) {
     assert(nalix_status_is_ok(&status));
     assert(client.state == NALIX_CHANNEL_IDLE);
 
+    /* Connecting to offline port transitions to TRANSIENT_FAILURE */
     status = nalix_client_connect(&client);
-    assert(nalix_status_is_ok(&status));
-    assert(client.state == NALIX_CHANNEL_READY);
+    assert(!nalix_status_is_ok(&status));
+    assert(status.code == NALIX_STATUS_UNAVAILABLE);
+    assert(client.state == NALIX_CHANNEL_TRANSIENT_FAILURE);
 
     status = nalix_client_disconnect(&client);
     assert(nalix_status_is_ok(&status));

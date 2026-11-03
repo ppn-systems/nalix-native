@@ -7,3 +7,6 @@ description = "Nalix Native Rust Client SDK"
 license = "Apache-2.0"
 
 [dependencies]
+tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "handshake"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+url = "2.5"

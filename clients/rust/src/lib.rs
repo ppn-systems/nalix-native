@@ -3,7 +3,7 @@ pub mod client;
 pub mod packet;
 pub mod status;
 
-pub use channel::{ChannelConfig, ConnectivityState};
+pub use channel::{ChannelConfig, ConnectivityState, TransportType};
 pub use client::NalixClient;
 pub use packet::{Packet, PacketHeader, NALIX_HEADER_SIZE};
 pub use status::{Status, StatusCode};
@@ -52,16 +52,44 @@ mod tests {
     }
 
     #[test]
-    fn test_client_lifecycle() {
-        let config = ChannelConfig::new("127.0.0.1:9000");
+    fn test_tcp_transport_roundtrip() {
+        use std::net::TcpListener;
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind local listener");
+        let local_addr = listener.local_addr().expect("Failed to get local addr");
+
+        let server_thread = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("Failed to accept");
+            let mut buf = [0u8; 11]; // 6 header + 5 payload
+            std::io::Read::read_exact(&mut stream, &mut buf).expect("Server read failed");
+            let pkt = Packet::decode(&buf).expect("Server packet decode failed");
+            assert_eq!(pkt.header.opcode, 0x1234);
+            assert_eq!(pkt.payload, vec![1, 2, 3, 4, 5]);
+        });
+
+        let config = ChannelConfig::tcp(local_addr.to_string());
+        let mut client = NalixClient::new(config);
+        client.connect().expect("TCP connect failed");
+        assert!(client.is_connected());
+
+        let header = PacketHeader::new(0x1234, 0x01, 0x02, 0x0001);
+        let packet = Packet::new(header, vec![1, 2, 3, 4, 5]);
+        client.send(&packet).expect("TCP send failed");
+
+        client.disconnect().expect("TCP disconnect failed");
+        server_thread.join().expect("Server thread panicked");
+    }
+
+    #[test]
+    fn test_client_lifecycle_offline() {
+        let config = ChannelConfig::tcp("127.0.0.1:9000");
         let mut client = NalixClient::new(config);
         assert_eq!(client.state(), ConnectivityState::Idle);
 
-        client.connect().expect("Connect should succeed");
-        assert_eq!(client.state(), ConnectivityState::Ready);
-
-        let packet = Packet::new(PacketHeader::default(), vec![]);
-        client.send(&packet).expect("Send should succeed");
+        // Attempting to connect to offline port sets TransientFailure
+        let _ = client.connect();
+        assert_eq!(client.state(), ConnectivityState::TransientFailure);
 
         client.disconnect().expect("Disconnect should succeed");
         assert_eq!(client.state(), ConnectivityState::Shutdown);

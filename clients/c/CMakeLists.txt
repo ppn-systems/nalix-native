@@ -17,6 +17,10 @@ target_include_directories(nalix_c PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
+if(WIN32)
+    target_link_libraries(nalix_c PUBLIC ws2_32)
+endif()
+
 enable_testing()
 add_executable(nalix_c_test tests/client_test.c)
 target_link_libraries(nalix_c_test PRIVATE nalix_c)
