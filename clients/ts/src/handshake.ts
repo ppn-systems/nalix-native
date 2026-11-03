@@ -1,8 +1,8 @@
 import { x25519 } from '@noble/curves/ed25519.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { hmac } from '@noble/hashes/hmac.js';
-import { Packet, PacketHeader } from './packet.js';
-import { ProtocolOpCode } from './protocol.js';
+import { Packet, PacketFlags, PacketPriority } from './packet.js';
+import { ControlType, ProtocolOpCode } from './protocol.js';
 import { NalixStatus, StatusCode } from './status.js';
 import { ITransportSession } from './base.js';
 
@@ -122,6 +122,7 @@ export interface HandshakeResult {
   sessionKey: Uint8Array;
   sessionToken: bigint;
   serverPublicKey: Uint8Array;
+  serverStaticKey: Uint8Array;
 }
 
 /**
@@ -139,18 +140,50 @@ export async function performHandshake(
   const allowTofu = options?.allowTofu ?? session.config.allowTofu;
   let pinnedServerKey = options?.serverPublicKey ?? session.config.serverPublicKey;
 
-  // 1. Generate client ephemeral keypair and 32-byte client nonce
+  // 1. Fetch Server Static Public Key via TOFU if not pinned (matching C# HandshakeExtensions)
+  if (!pinnedServerKey) {
+    if (!allowTofu) {
+      throw new NalixStatus(StatusCode.PERMISSION_DENIED, 'ServerPublicKey is required when AllowTofu is disabled');
+    }
+
+    const tofuReq = new Uint8Array(3);
+    const view = new DataView(tofuReq.buffer);
+    view.setUint16(0, 0, true); // Reason = NONE
+    tofuReq[2] = ControlType.PUBLIC_KEY_REQUEST; // 0x16
+
+    const tofuPacket = await session.request(
+      Packet.create(ProtocolOpCode.SYSTEM_CONTROL, tofuReq, {
+        flags: PacketFlags.SYSTEM,
+        priority: PacketPriority.HIGH,
+      }),
+      {
+        timeoutMs,
+        predicate: (p) => p.header.opcode === ProtocolOpCode.SESSION_TOFU,
+      }
+    );
+
+    if (tofuPacket.payload.length < 32) {
+      throw new NalixStatus(StatusCode.INVALID_ARGUMENT, 'Malformed SessionTofu payload: expected 32 bytes');
+    }
+
+    pinnedServerKey = tofuPacket.payload.slice(0, 32);
+  }
+
+  // 2. Generate client ephemeral keypair and 32-byte client nonce
   const clientKey = x25519.keygen();
   const clientNonce = new Uint8Array(32);
   crypto.getRandomValues(clientNonce);
 
-  // 2. Build SessionInit payload (OpCode: 0x0000, 64 bytes: clientPublicKey[32] + clientNonce[32])
+  // 3. Build SessionInit payload (OpCode: 0x0000, 64 bytes: clientPublicKey[32] + clientNonce[32])
   const initPayload = new Uint8Array(64);
   initPayload.set(clientKey.publicKey, 0);
   initPayload.set(clientNonce, 32);
-  const initPacket = new Packet(new PacketHeader(ProtocolOpCode.SESSION_INIT, 0, 0, 0), initPayload);
+  const initPacket = Packet.create(ProtocolOpCode.SESSION_INIT, initPayload, {
+    flags: PacketFlags.SYSTEM,
+    priority: PacketPriority.URGENT,
+  });
 
-  // 3. Send SessionInit and await SessionChallenge (OpCode: 0x0006)
+  // 4. Send SessionInit and await SessionChallenge (OpCode: 0x0006)
   const challengePacket = await session.request(initPacket, {
     timeoutMs,
     predicate: (p) => p.header.opcode === ProtocolOpCode.SESSION_CHALLENGE,
@@ -160,22 +193,14 @@ export async function performHandshake(
     throw new NalixStatus(StatusCode.INVALID_ARGUMENT, 'Malformed SessionChallenge payload: expected 96 bytes');
   }
 
-  const serverPublicKey = challengePacket.payload.slice(0, 32);
+  const serverEphemeralKey = challengePacket.payload.slice(0, 32);
   const serverNonce = challengePacket.payload.slice(32, 64);
   const serverProof = challengePacket.payload.slice(64, 96);
 
-  // 4. Handle Server Public Key (TOFU vs Pinned)
-  if (!pinnedServerKey) {
-    if (!allowTofu) {
-      throw new NalixStatus(StatusCode.PERMISSION_DENIED, 'ServerPublicKey is required when AllowTofu is disabled');
-    }
-    pinnedServerKey = serverPublicKey;
-  }
-
   // 5. Diffie-Hellman Key Agreement:
-  // sharedSecretEE = X25519(clientPrivateKey, serverPublicKey)
+  // sharedSecretEE = X25519(clientPrivateKey, serverEphemeralKey)
   // sharedSecretSE = X25519(clientPrivateKey, pinnedServerKey)
-  const sharedSecretEE = x25519.getSharedSecret(clientKey.secretKey, serverPublicKey);
+  const sharedSecretEE = x25519.getSharedSecret(clientKey.secretKey, serverEphemeralKey);
   const sharedSecretSE = x25519.getSharedSecret(clientKey.secretKey, pinnedServerKey);
 
   // 6. Compute Master Secret & Transcript Hash
@@ -183,7 +208,7 @@ export async function performHandshake(
   const transcriptHash = HandshakeX25519.computeTranscriptHash(
     clientKey.publicKey,
     clientNonce,
-    serverPublicKey,
+    serverEphemeralKey,
     serverNonce
   );
 
@@ -206,7 +231,10 @@ export async function performHandshake(
 
   // 10. Send SessionProof (OpCode: 0x0003, 32 bytes client proof) unencrypted and await SessionEstablished (OpCode: 0x0007)
   const clientProof = HandshakeX25519.computeClientProof(masterSecret, transcriptHash);
-  const proofPacket = new Packet(new PacketHeader(ProtocolOpCode.SESSION_PROOF, 0, 0, 0), clientProof);
+  const proofPacket = Packet.create(ProtocolOpCode.SESSION_PROOF, clientProof, {
+    flags: PacketFlags.SYSTEM,
+    priority: PacketPriority.HIGH,
+  });
 
   const establishedPacket = await session.request(proofPacket, {
     timeoutMs,
@@ -239,7 +267,8 @@ export async function performHandshake(
   return {
     sessionKey,
     sessionToken,
-    serverPublicKey,
+    serverPublicKey: pinnedServerKey,
+    serverStaticKey: pinnedServerKey,
   };
 }
 

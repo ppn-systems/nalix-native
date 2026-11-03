@@ -20,7 +20,7 @@ export class LZ4BlockHeader {
   }
 
   public encode(dst: Uint8Array, offset: number = 0): void {
-    if (dst.length - offset < LZ4_BLOCK_HEADER_SIZE) {
+    if (offset < 0 || dst.length - offset < LZ4_BLOCK_HEADER_SIZE) {
       throw new NalixStatus(StatusCode.RESOURCE_EXHAUSTED, 'Buffer too small for LZ4 block header');
     }
     const view = new DataView(dst.buffer, dst.byteOffset + offset, LZ4_BLOCK_HEADER_SIZE);
@@ -29,7 +29,7 @@ export class LZ4BlockHeader {
   }
 
   public static decode(src: Uint8Array, offset: number = 0): LZ4BlockHeader {
-    if (src.length - offset < LZ4_BLOCK_HEADER_SIZE) {
+    if (offset < 0 || src.length - offset < LZ4_BLOCK_HEADER_SIZE) {
       throw new NalixStatus(StatusCode.OUT_OF_RANGE, 'Source too small for LZ4 block header');
     }
     const view = new DataView(src.buffer, src.byteOffset + offset, LZ4_BLOCK_HEADER_SIZE);
@@ -94,10 +94,16 @@ export class FrameCompression {
     try {
       const decompressed = lz4.decompress(compressedBlock);
       if (decompressed.length !== header.originalLength) {
-        // Some lz4 blocks might need exact sizing or match
+        throw new NalixStatus(
+          StatusCode.DATA_LOSS,
+          `LZ4 decompressed length ${decompressed.length} does not match header ${header.originalLength}`
+        );
       }
       return decompressed;
     } catch (err: any) {
+      if (err instanceof NalixStatus) {
+        throw err;
+      }
       throw new NalixStatus(StatusCode.DATA_LOSS, `LZ4 decompression failed: ${err.message || err}`);
     }
   }

@@ -8,9 +8,24 @@ export const NALIX_HEADER_SIZE = 6;
  */
 export enum PacketFlags {
   NONE = 0x00,
-  COMPRESSED = 1 << 1, // 0x02
+  COMPRESSED = 1 << 1,  // 0x02
   ENCRYPTED = 1 << 2,   // 0x04
   FRAGMENTED = 1 << 3,  // 0x08
+  RELIABLE = 1 << 4,    // 0x10
+  UNRELIABLE = 1 << 5,  // 0x20
+  ACKNOWLEDGED = 1 << 6,// 0x40
+  SYSTEM = 1 << 7,      // 0x80
+}
+
+/**
+ * Relative priority levels matching Nalix.Abstractions.Networking.Packets.PacketPriority.
+ */
+export enum PacketPriority {
+  NONE = 0x00,
+  LOW = 0x01,
+  MEDIUM = 0x02,
+  HIGH = 0x03,
+  URGENT = 0x04,
 }
 
 /**
@@ -35,7 +50,7 @@ export class PacketHeader {
   }
 
   public encode(dst: Uint8Array, offset: number = 0): void {
-    if (dst.length - offset < NALIX_HEADER_SIZE) {
+    if (offset < 0 || dst.length - offset < NALIX_HEADER_SIZE) {
       throw new NalixStatus(StatusCode.RESOURCE_EXHAUSTED, 'Destination buffer too small for 6-byte header');
     }
     const view = new DataView(dst.buffer, dst.byteOffset + offset, NALIX_HEADER_SIZE);
@@ -46,7 +61,7 @@ export class PacketHeader {
   }
 
   public static decode(src: Uint8Array, offset: number = 0): PacketHeader {
-    if (src.length - offset < NALIX_HEADER_SIZE) {
+    if (offset < 0 || src.length - offset < NALIX_HEADER_SIZE) {
       throw new NalixStatus(StatusCode.OUT_OF_RANGE, 'Source buffer too small for 6-byte header');
     }
     const view = new DataView(src.buffer, src.byteOffset + offset, NALIX_HEADER_SIZE);
@@ -65,6 +80,7 @@ export interface PacketCreateOptions {
   flags?: number;
   priority?: number;
   sequenceId?: number;
+  encrypt?: boolean;
 }
 
 /**

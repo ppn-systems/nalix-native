@@ -1,5 +1,5 @@
 import { ChannelConfig, ConnectivityState } from './channel.js';
-import { Packet, PacketCreateOptions, PayloadLike } from './packet.js';
+import { Packet, PacketCreateOptions, PayloadLike, PacketFlags, PacketPriority } from './packet.js';
 import { ControlType, ProtocolOpCode } from './protocol.js';
 import { NalixStatus, StatusCode } from './status.js';
 import { SessionState } from './state.js';
@@ -17,6 +17,7 @@ export interface ITransportSession {
   readonly config: ChannelConfig;
   readonly state: ConnectivityState;
   readonly isConnected: boolean;
+  readonly isEncrypted: boolean;
   readonly sessionState: SessionState;
 
   connect(): Promise<void>;
@@ -35,6 +36,7 @@ export interface ITransportSession {
   onPacket(callback: PacketCallback): Subscription;
   onStateChange(callback: StateCallback): Subscription;
   ping(timeoutMs?: number): Promise<number>;
+  syncTime(timeoutMs?: number): Promise<{ rttMs: number; offsetMs: number }>;
 
   setSecret(secret: Uint8Array): void;
   enableEncryption(secret?: Uint8Array): void;
@@ -67,6 +69,10 @@ export abstract class TransportSession implements ITransportSession {
   }
 
   public abstract get isConnected(): boolean;
+
+  public get isEncrypted(): boolean {
+    return this._sessionState.encryptionEnabled;
+  }
 
   public get sessionState(): SessionState {
     return this._sessionState;
@@ -184,10 +190,18 @@ export abstract class TransportSession implements ITransportSession {
       this.config,
       this._sessionState,
       () => this.nextSequenceId(),
-      () => this.nextSeq32()
+      () => this.nextSeq32(),
+      options?.encrypt
     );
 
     const bytes = processed.encode();
+    if (bytes.length > this.config.maxMessageSize) {
+      throw new NalixStatus(
+        StatusCode.RESOURCE_EXHAUSTED,
+        `Packet size ${bytes.length} exceeds maximum allowed message size ${this.config.maxMessageSize}`
+      );
+    }
+
     this.sendRawFrame(bytes);
     return processed.header.sequenceId;
   }
@@ -229,6 +243,22 @@ export abstract class TransportSession implements ITransportSession {
     const targetSeq = packet.header.sequenceId;
     const timeoutMs = options.timeoutMs ?? this.config.requestTimeoutMs;
 
+    const processed = FramePipeline.processOutbound(
+      packet,
+      this.config,
+      this._sessionState,
+      () => this.nextSequenceId(),
+      () => this.nextSeq32(),
+      options.encrypt
+    );
+    const bytes = processed.encode();
+    if (bytes.length > this.config.maxMessageSize) {
+      throw new NalixStatus(
+        StatusCode.RESOURCE_EXHAUSTED,
+        `Packet size ${bytes.length} exceeds maximum allowed message size ${this.config.maxMessageSize}`
+      );
+    }
+
     const promise = this._pendingRequests.register(
       targetSeq,
       packet.header.opcode,
@@ -237,43 +267,92 @@ export abstract class TransportSession implements ITransportSession {
     );
 
     try {
-      const processed = FramePipeline.processOutbound(
-        packet,
-        this.config,
-        this._sessionState,
-        () => this.nextSequenceId(),
-        () => this.nextSeq32()
-      );
-      const bytes = processed.encode();
       this.sendRawFrame(bytes);
     } catch (err: any) {
-      this._pendingRequests.drain(new NalixStatus(StatusCode.INTERNAL, err?.message ?? 'Failed to send request frame'));
-      throw err;
+      const status =
+        err instanceof NalixStatus
+          ? err
+          : new NalixStatus(StatusCode.INTERNAL, err?.message ?? 'Failed to send request frame');
+      this._pendingRequests.cancel(targetSeq, status);
+      promise.catch(() => {});
+      throw status;
     }
 
     return promise;
   }
 
   /**
-   * Measures network round-trip time (RTT) by sending a SYSTEM_CONTROL PING packet and awaiting PONG.
+   * Measures network round-trip time (RTT) by sending a SYSTEM_TIMESYNC PING packet and awaiting PONG.
+   * Matches Nalix C# PingExtensions.PingAsync.
    */
   public async ping(timeoutMs: number = 5000): Promise<number> {
     const start = performance.now();
+    const payload = new Uint8Array(17);
+    const view = new DataView(payload.buffer);
+    payload[0] = ControlType.PING;
+    const now = BigInt(Date.now());
+    view.setBigInt64(1, now, true);
+    view.setBigInt64(9, BigInt(Math.floor(performance.now() * 1000)), true);
+
     const pingPacket = Packet.create(
-      ProtocolOpCode.SYSTEM_CONTROL,
-      new Uint8Array([ControlType.PING]),
-      { priority: 0xff }
+      ProtocolOpCode.SYSTEM_TIMESYNC,
+      payload,
+      {
+        flags: PacketFlags.SYSTEM,
+        priority: PacketPriority.HIGH,
+      }
     );
 
     await this.request(pingPacket, {
       timeoutMs,
+      encrypt: false,
       predicate: (incoming) =>
-        incoming.header.opcode === ProtocolOpCode.SYSTEM_CONTROL &&
+        incoming.header.opcode === ProtocolOpCode.SYSTEM_TIMESYNC &&
         incoming.payload.length > 0 &&
         incoming.payload[0] === ControlType.PONG,
     });
 
     return performance.now() - start;
+  }
+
+  /**
+   * Synchronizes client clock with the remote server.
+   * Matches Nalix C# TimeSyncExtensions.SyncTimeAsync.
+   */
+  public async syncTime(timeoutMs: number = 5000): Promise<{ rttMs: number; offsetMs: number }> {
+    const start = performance.now();
+    const payload = new Uint8Array(17);
+    const view = new DataView(payload.buffer);
+    payload[0] = ControlType.TIMESYNCREQUEST;
+    const t1 = Date.now();
+    view.setBigInt64(1, BigInt(t1), true);
+    view.setBigInt64(9, BigInt(Math.floor(start * 1000)), true);
+
+    const reqPacket = Packet.create(
+      ProtocolOpCode.SYSTEM_TIMESYNC,
+      payload,
+      {
+        flags: PacketFlags.SYSTEM,
+        priority: PacketPriority.HIGH,
+      }
+    );
+
+    const res = await this.request(reqPacket, {
+      timeoutMs,
+      encrypt: false,
+      predicate: (incoming) =>
+        incoming.header.opcode === ProtocolOpCode.SYSTEM_TIMESYNC &&
+        incoming.payload.length >= 9 &&
+        incoming.payload[0] === ControlType.TIMESYNCRESPONSE,
+    });
+
+    const end = performance.now();
+    const rttMs = end - start;
+    const resView = new DataView(res.payload.buffer, res.payload.byteOffset, res.payload.byteLength);
+    const serverTimestamp = Number(resView.getBigInt64(1, true));
+    const offsetMs = serverTimestamp - (t1 + rttMs / 2);
+
+    return { rttMs, offsetMs };
   }
 
   /**

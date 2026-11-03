@@ -21,7 +21,8 @@ export class FramePipeline {
     config: ChannelConfig,
     state: SessionState,
     nextSeq16: () => number,
-    nextSeq32: () => number
+    nextSeq32: () => number,
+    encrypt?: boolean
   ): Packet {
     // 1. Auto-assign 16-bit packet sequence ID if unset (0)
     if (packet.header.sequenceId === 0) {
@@ -41,7 +42,13 @@ export class FramePipeline {
     }
 
     // 3. Encryption (encrypt after compression)
-    if (state.encryptionEnabled) {
+    // System frames (opcode < 0x0100) are unencrypted by default unless explicitly specified.
+    // Application frames (opcode >= 0x0100) are encrypted when session encryption is enabled.
+    const shouldEncrypt = encrypt !== undefined
+      ? encrypt
+      : (state.encryptionEnabled && packet.header.opcode >= 0x0100);
+
+    if (shouldEncrypt) {
       if (!state.secret) {
         throw new NalixStatus(StatusCode.FAILED_PRECONDITION, 'Encryption requested but no session secret configured');
       }

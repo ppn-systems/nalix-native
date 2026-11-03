@@ -7,6 +7,7 @@ export interface RequestOptions {
   priority?: number;
   sequenceId?: number;
   predicate?: (packet: Packet) => boolean;
+  encrypt?: boolean;
 }
 
 export interface PendingWaiter {
@@ -87,6 +88,21 @@ export class PendingRequestManager {
     for (const waiter of this._waiters) {
       if (waiter.matches(packet)) {
         waiter.resolve(packet);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Cancels a specific in-flight pending request without disturbing other requests.
+   */
+  public cancel(sequenceId: number, status: NalixStatus): boolean {
+    for (const waiter of this._waiters) {
+      if (waiter.sequenceId === sequenceId) {
+        clearTimeout(waiter.timer);
+        this._waiters.delete(waiter);
+        waiter.reject(status);
         return true;
       }
     }

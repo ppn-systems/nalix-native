@@ -2,47 +2,45 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   WebSocketSession,
-  Packet,
-  PacketHeader,
   ConnectivityState,
   ProtocolOpCode,
 } from '../src/index.js';
 
-test('Live WebSocket session to atmosos.eyc.asia:443 with ergonomic APIs', async () => {
-  // Construct WebSocketSession directly from URL string
+test('Live WebSocket session to atmosos.eyc.asia:443 with handshake, ping, and timesync', async (t) => {
   const session = new WebSocketSession('wss://atmosos.eyc.asia/ws/');
   assert.equal(session.state, ConnectivityState.IDLE);
 
-  // Register state change listener
   const states: ConnectivityState[] = [];
   const stateSub = session.onStateChange((s) => states.push(s));
 
-  // Connect live
-  await session.connect();
+  try {
+    await session.connect();
+  } catch (err) {
+    stateSub.unsubscribe();
+    t.skip(`Live server atmosos.eyc.asia:443 unreachable: ${(err as Error).message}`);
+    return;
+  }
+
   assert.equal(session.isConnected, true);
   assert.equal(session.state, ConnectivityState.READY);
 
-  // Register an OpCode subscription (matching C# session.On<T>)
-  let receivedSessionSignal = false;
-  const sub = session.on(ProtocolOpCode.SESSION_SIGNAL, (_packet) => {
-    receivedSessionSignal = true;
-  });
+  // 1. Perform full TOFU Handshake
+  const hsResult = await session.handshake();
+  assert.ok(hsResult.sessionToken > 0n, 'Handshake should produce a valid session token');
+  assert.equal(hsResult.serverStaticKey.length, 32, 'Server static identity key must be 32 bytes');
+  assert.equal(session.isEncrypted, true, 'Session should be encrypted after handshake');
 
-  // Shorthand send with random 64-byte payload (SessionInit)
-  const payload = new Uint8Array(64);
-  crypto.getRandomValues(payload);
+  // 2. Perform Timesync Ping
+  const pingRtt = await session.ping(5000);
+  assert.ok(pingRtt >= 0, `Ping RTT should be non-negative: ${pingRtt}ms`);
 
-  const seqId = session.send(ProtocolOpCode.SESSION_INIT, payload, {
-    flags: 0x04,
-    priority: 0x03,
-  });
-  assert.ok(seqId > 0, 'SequenceId should be auto-assigned');
+  // 3. Perform Clock Synchronization
+  const sync = await session.syncTime(5000);
+  assert.ok(sync.rttMs >= 0, `SyncTime RTT should be non-negative: ${sync.rttMs}ms`);
+  assert.ok(typeof sync.offsetMs === 'number', 'SyncTime offset should be a number');
 
-  // Unsubscribe listener
-  sub.unsubscribe();
+  // 4. Clean shutdown
   stateSub.unsubscribe();
-
-  // Clean close
   session.close();
   assert.equal(session.state, ConnectivityState.SHUTDOWN);
   assert.equal(session.isConnected, false);

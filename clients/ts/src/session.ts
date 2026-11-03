@@ -1,6 +1,5 @@
 import { ChannelConfig, ChannelConfigOptions, ConnectivityState } from './channel.js';
 import { Packet } from './packet.js';
-import { ControlType, ProtocolOpCode } from './protocol.js';
 import { NalixStatus, StatusCode } from './status.js';
 import { SessionState } from './state.js';
 import { FramePipeline } from './pipeline.js';
@@ -123,6 +122,11 @@ export class WebSocketSession extends TransportSession {
               return;
             }
 
+            if (buffer.length > this.config.maxMessageSize) {
+              // Exceeds max allowable frame length; drop frame
+              return;
+            }
+
             const rawPacket = Packet.decode(buffer);
             const packet = FramePipeline.processInbound(rawPacket, this._sessionState);
             this.dispatchInboundPacket(packet);
@@ -163,18 +167,7 @@ export class WebSocketSession extends TransportSession {
     this._heartbeatTimer = setInterval(async () => {
       if (this.isConnected) {
         try {
-          const pingPacket = Packet.create(
-            ProtocolOpCode.SYSTEM_CONTROL,
-            new Uint8Array([ControlType.PING]),
-            { priority: 0xff }
-          );
-          await this.request(pingPacket, {
-            timeoutMs: 3000,
-            predicate: (p) =>
-              p.header.opcode === ProtocolOpCode.SYSTEM_CONTROL &&
-              p.payload.length > 0 &&
-              p.payload[0] === ControlType.PONG,
-          });
+          await this.ping(3000);
         } catch {
           // Heartbeat missed: trigger reconnect
           this.cleanupSocket();

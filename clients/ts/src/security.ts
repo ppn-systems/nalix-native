@@ -52,7 +52,7 @@ export class EnvelopeHeader {
   }
 
   public encode(dst: Uint8Array, offset: number = 0): void {
-    if (dst.length - offset < ENVELOPE_HEADER_SIZE) {
+    if (offset < 0 || dst.length - offset < ENVELOPE_HEADER_SIZE) {
       throw new NalixStatus(StatusCode.RESOURCE_EXHAUSTED, 'Buffer too small for envelope header');
     }
     const view = new DataView(dst.buffer, dst.byteOffset + offset, ENVELOPE_HEADER_SIZE);
@@ -65,7 +65,7 @@ export class EnvelopeHeader {
   }
 
   public static decode(src: Uint8Array, offset: number = 0): EnvelopeHeader {
-    if (src.length - offset < ENVELOPE_HEADER_SIZE) {
+    if (offset < 0 || src.length - offset < ENVELOPE_HEADER_SIZE) {
       throw new NalixStatus(StatusCode.OUT_OF_RANGE, 'Source too small for envelope header');
     }
     const view = new DataView(src.buffer, src.byteOffset + offset, ENVELOPE_HEADER_SIZE);
