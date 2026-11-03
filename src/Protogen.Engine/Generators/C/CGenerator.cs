@@ -67,6 +67,19 @@ public sealed class CGenerator : ICodeGenerator
         _ = sb.AppendLine("// null = length -1, empty = length 0, otherwise [int32_t length][utf8 bytes]");
         _ = sb.AppendLine("typedef struct { int32_t length; uint8_t* data; } NalixString;");
         _ = sb.AppendLine();
+        _ = sb.AppendLine("// Dynamic arrays / collections (matches Nalix wire format [int32_t count][elements...])");
+        _ = sb.AppendLine("typedef struct { int32_t count; uint8_t* data; } ByteArray;");
+        _ = sb.AppendLine("typedef struct { int32_t count; int8_t* data; } Int8Array;");
+        _ = sb.AppendLine("typedef struct { int32_t count; int16_t* data; } Int16Array;");
+        _ = sb.AppendLine("typedef struct { int32_t count; uint16_t* data; } UInt16Array;");
+        _ = sb.AppendLine("typedef struct { int32_t count; int32_t* data; } Int32Array;");
+        _ = sb.AppendLine("typedef struct { int32_t count; uint32_t* data; } UInt32Array;");
+        _ = sb.AppendLine("typedef struct { int32_t count; int64_t* data; } Int64Array;");
+        _ = sb.AppendLine("typedef struct { int32_t count; uint64_t* data; } UInt64Array;");
+        _ = sb.AppendLine("typedef struct { int32_t count; float* data; } FloatArray;");
+        _ = sb.AppendLine("typedef struct { int32_t count; double* data; } DoubleArray;");
+        _ = sb.AppendLine("typedef struct { int32_t count; NalixString* data; } StringArray;");
+        _ = sb.AppendLine();
         AppendInvariant(sb, $"// Nalix v14 standard {ProtocolConstants.PacketHeaderSize}-byte packet header");
         AppendInvariant(sb, $"#define PACKET_HEADER_SIZE {ProtocolConstants.PacketHeaderSize}");
         _ = sb.AppendLine();
@@ -95,6 +108,17 @@ public sealed class CGenerator : ICodeGenerator
         _ = sb.AppendLine("#endif");
         _ = sb.AppendLine();
         _ = sb.AppendLine("void nalix_string_free(NalixString* s);");
+        _ = sb.AppendLine("void string_array_free(StringArray* arr);");
+        _ = sb.AppendLine("void byte_array_free(ByteArray* arr);");
+        _ = sb.AppendLine("void int8_array_free(Int8Array* arr);");
+        _ = sb.AppendLine("void int16_array_free(Int16Array* arr);");
+        _ = sb.AppendLine("void uint16_array_free(UInt16Array* arr);");
+        _ = sb.AppendLine("void int32_array_free(Int32Array* arr);");
+        _ = sb.AppendLine("void uint32_array_free(UInt32Array* arr);");
+        _ = sb.AppendLine("void int64_array_free(Int64Array* arr);");
+        _ = sb.AppendLine("void uint64_array_free(UInt64Array* arr);");
+        _ = sb.AppendLine("void float_array_free(FloatArray* arr);");
+        _ = sb.AppendLine("void double_array_free(DoubleArray* arr);");
         _ = sb.AppendLine("size_t packet_header_serialize(const PacketHeader* header, uint8_t* buf, size_t buf_size);");
         _ = sb.AppendLine("size_t packet_header_deserialize(PacketHeader* header, const uint8_t* buf, size_t buf_size);");
         _ = sb.AppendLine();
@@ -133,7 +157,7 @@ public sealed class CGenerator : ICodeGenerator
             AppendInvariant(sb, $"size_t {lower}_serialize(const {p.Name}* pkt, uint8_t* buf, size_t buf_size);");
             AppendInvariant(sb, $"size_t {lower}_deserialize({p.Name}* pkt, const uint8_t* buf, size_t buf_size);");
             AppendInvariant(sb, $"bool {lower}_equals(const {p.Name}* a, const {p.Name}* b);");
-            if (p.Fields.Any(f => f.CType == ProtocolConstants.StringCType))
+            if (p.Fields.Any(f => f.CType == ProtocolConstants.StringCType || f.CType.EndsWith("Array", StringComparison.Ordinal)))
             {
                 AppendInvariant(sb, $"void {lower}_free({p.Name}* pkt);");
             }
@@ -158,6 +182,28 @@ public sealed class CGenerator : ICodeGenerator
 
         _ = sb.AppendLine("void nalix_string_free(NalixString* s) {");
         _ = sb.AppendLine("    if (s && s->data) { free(s->data); s->data = NULL; s->length = 0; }");
+        _ = sb.AppendLine("}");
+        _ = sb.AppendLine();
+        _ = sb.AppendLine("void byte_array_free(ByteArray* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine("void int8_array_free(Int8Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine("void int16_array_free(Int16Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine("void uint16_array_free(UInt16Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine("void int32_array_free(Int32Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine("void uint32_array_free(UInt32Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine("void int64_array_free(Int64Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine("void uint64_array_free(UInt64Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine("void float_array_free(FloatArray* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine("void double_array_free(DoubleArray* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }");
+        _ = sb.AppendLine();
+        _ = sb.AppendLine("void string_array_free(StringArray* arr) {");
+        _ = sb.AppendLine("    if (arr && arr->data) {");
+        _ = sb.AppendLine("        for (int32_t i = 0; i < arr->count; i++) {");
+        _ = sb.AppendLine("            nalix_string_free(&arr->data[i]);");
+        _ = sb.AppendLine("        }");
+        _ = sb.AppendLine("        free(arr->data);");
+        _ = sb.AppendLine("        arr->data = NULL;");
+        _ = sb.AppendLine("        arr->count = 0;");
+        _ = sb.AppendLine("    }");
         _ = sb.AppendLine("}");
         _ = sb.AppendLine();
 
@@ -245,8 +291,8 @@ public sealed class CGenerator : ICodeGenerator
                 _ = sb.AppendLine("}");
                 _ = sb.AppendLine();
 
-                // Free helper for dynamic strings
-                if (p.Fields.Any(f => f.CType == ProtocolConstants.StringCType))
+                // Free helper for dynamic fields
+                if (p.Fields.Any(f => f.CType == ProtocolConstants.StringCType || f.CType.EndsWith("Array", StringComparison.Ordinal)))
                 {
                     AppendInvariant(sb, $"void {lower}_free({name}* pkt)");
                     _ = sb.AppendLine("{");
@@ -256,6 +302,15 @@ public sealed class CGenerator : ICodeGenerator
                         if (field.CType == ProtocolConstants.StringCType)
                         {
                             AppendInvariant(sb, $"    nalix_string_free(&pkt->{field.Name});");
+                        }
+                        else if (field.CType == "StringArray")
+                        {
+                            AppendInvariant(sb, $"    string_array_free(&pkt->{field.Name});");
+                        }
+                        else if (field.CType.EndsWith("Array", StringComparison.Ordinal))
+                        {
+                            string helper = GetArrayFreeHelper(field.CType);
+                            AppendInvariant(sb, $"    {helper}(&pkt->{field.Name});");
                         }
                     }
                     _ = sb.AppendLine("}");
@@ -315,7 +370,7 @@ public sealed class CGenerator : ICodeGenerator
         {
             AppendInvariant(sb, $"    if (pkt->has_{name}) {{");
             _ = sb.AppendLine("        ptr[0] = 1; ptr += 1;");
-            if (field.CType != ProtocolConstants.StringCType)
+            if (field.CType != ProtocolConstants.StringCType && !field.CType.EndsWith("Array", StringComparison.Ordinal))
             {
                 AppendInvariant(sb, $"        if ((size_t)(ptr - buf) + {size} > buf_size) return 0;");
             }
@@ -335,9 +390,35 @@ public sealed class CGenerator : ICodeGenerator
         {
             AppendInvariant(sb, $"    {indent}{{");
             AppendInvariant(sb, $"    {indent}    int32_t slen = pkt->{name}.length;");
-            AppendInvariant(sb, $"    {indent}    if ((size_t)(ptr - buf) + 4 + (slen > 0 ? slen : 0) > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}    if ((size_t)(ptr - buf) + 4 + (slen > 0 ? (size_t)slen : 0) > buf_size) return 0;");
             AppendInvariant(sb, $"    {indent}    memcpy(ptr, &slen, 4); ptr += 4;");
-            AppendInvariant(sb, $"    {indent}    if (slen > 0 && pkt->{name}.data) {{ memcpy(ptr, pkt->{name}.data, slen); ptr += slen; }}");
+            AppendInvariant(sb, $"    {indent}    if (slen > 0 && pkt->{name}.data) {{ memcpy(ptr, pkt->{name}.data, (size_t)slen); ptr += (size_t)slen; }}");
+            AppendInvariant(sb, $"    {indent}}}");
+        }
+        else if (field.CType == "StringArray")
+        {
+            AppendInvariant(sb, $"    {indent}{{");
+            AppendInvariant(sb, $"    {indent}    int32_t cnt = pkt->{name}.count;");
+            AppendInvariant(sb, $"    {indent}    if ((size_t)(ptr - buf) + 4 > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}    memcpy(ptr, &cnt, 4); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}    if (cnt > 0 && pkt->{name}.data) {{");
+            AppendInvariant(sb, $"    {indent}        for (int32_t i = 0; i < cnt; i++) {{");
+            AppendInvariant(sb, $"    {indent}            int32_t slen = pkt->{name}.data[i].length;");
+            AppendInvariant(sb, $"    {indent}            if ((size_t)(ptr - buf) + 4 + (slen > 0 ? (size_t)slen : 0) > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}            memcpy(ptr, &slen, 4); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}            if (slen > 0 && pkt->{name}.data[i].data) {{ memcpy(ptr, pkt->{name}.data[i].data, (size_t)slen); ptr += (size_t)slen; }}");
+            AppendInvariant(sb, $"    {indent}        }}");
+            AppendInvariant(sb, $"    {indent}    }}");
+            AppendInvariant(sb, $"    {indent}}}");
+        }
+        else if (field.CType.EndsWith("Array", StringComparison.Ordinal))
+        {
+            string elemCType = GetArrayElementCType(field.CType);
+            AppendInvariant(sb, $"    {indent}{{");
+            AppendInvariant(sb, $"    {indent}    int32_t cnt = pkt->{name}.count;");
+            AppendInvariant(sb, $"    {indent}    if ((size_t)(ptr - buf) + 4 + (cnt > 0 ? (size_t)cnt * sizeof({elemCType}) : 0) > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}    memcpy(ptr, &cnt, 4); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}    if (cnt > 0 && pkt->{name}.data) {{ memcpy(ptr, pkt->{name}.data, (size_t)cnt * sizeof({elemCType})); ptr += (size_t)cnt * sizeof({elemCType}); }}");
             AppendInvariant(sb, $"    {indent}}}");
         }
         else if (size == 1)
@@ -387,7 +468,7 @@ public sealed class CGenerator : ICodeGenerator
             _ = sb.AppendLine("    if (ptr[0] == 1) {");
             AppendInvariant(sb, $"        pkt->has_{name} = true;");
             _ = sb.AppendLine("        ptr += 1;");
-            if (field.CType != ProtocolConstants.StringCType)
+            if (field.CType != ProtocolConstants.StringCType && !field.CType.EndsWith("Array", StringComparison.Ordinal))
             {
                 AppendInvariant(sb, $"        if ((size_t)(ptr - buf) + {size} > buf_size) return 0;");
             }
@@ -410,10 +491,58 @@ public sealed class CGenerator : ICodeGenerator
             AppendInvariant(sb, $"    {indent}    memcpy(&slen, ptr, 4); ptr += 4;");
             AppendInvariant(sb, $"    {indent}    pkt->{name}.length = slen;");
             AppendInvariant(sb, $"    {indent}    if (slen > 0) {{");
-            AppendInvariant(sb, $"    {indent}        if ((size_t)(ptr - buf) + slen > buf_size) return 0;");
-            AppendInvariant(sb, $"    {indent}        pkt->{name}.data = (uint8_t*)malloc(slen);");
-            AppendInvariant(sb, $"    {indent}        memcpy(pkt->{name}.data, ptr, slen);");
-            AppendInvariant(sb, $"    {indent}        ptr += slen;");
+            AppendInvariant(sb, $"    {indent}        if ((size_t)(ptr - buf) + (size_t)slen > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}        pkt->{name}.data = (uint8_t*)malloc((size_t)slen);");
+            AppendInvariant(sb, $"    {indent}        memcpy(pkt->{name}.data, ptr, (size_t)slen);");
+            AppendInvariant(sb, $"    {indent}        ptr += (size_t)slen;");
+            AppendInvariant(sb, $"    {indent}    }} else {{");
+            AppendInvariant(sb, $"    {indent}        pkt->{name}.data = NULL;");
+            AppendInvariant(sb, $"    {indent}    }}");
+            AppendInvariant(sb, $"    {indent}}}");
+        }
+        else if (field.CType == "StringArray")
+        {
+            AppendInvariant(sb, $"    {indent}{{");
+            AppendInvariant(sb, $"    {indent}    if ((size_t)(ptr - buf) + 4 > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}    int32_t cnt = 0;");
+            AppendInvariant(sb, $"    {indent}    memcpy(&cnt, ptr, 4); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}    pkt->{name}.count = cnt;");
+            AppendInvariant(sb, $"    {indent}    if (cnt > 0) {{");
+            AppendInvariant(sb, $"    {indent}        pkt->{name}.data = (NalixString*)malloc((size_t)cnt * sizeof(NalixString));");
+            AppendInvariant(sb, $"    {indent}        if (!pkt->{name}.data) return 0;");
+            AppendInvariant(sb, $"    {indent}        for (int32_t i = 0; i < cnt; i++) {{");
+            AppendInvariant(sb, $"    {indent}            if ((size_t)(ptr - buf) + 4 > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}            int32_t slen = 0;");
+            AppendInvariant(sb, $"    {indent}            memcpy(&slen, ptr, 4); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}            pkt->{name}.data[i].length = slen;");
+            AppendInvariant(sb, $"    {indent}            if (slen > 0) {{");
+            AppendInvariant(sb, $"    {indent}                if ((size_t)(ptr - buf) + (size_t)slen > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}                pkt->{name}.data[i].data = (uint8_t*)malloc((size_t)slen);");
+            AppendInvariant(sb, $"    {indent}                if (!pkt->{name}.data[i].data) return 0;");
+            AppendInvariant(sb, $"    {indent}                memcpy(pkt->{name}.data[i].data, ptr, (size_t)slen); ptr += (size_t)slen;");
+            AppendInvariant(sb, $"    {indent}            }} else {{");
+            AppendInvariant(sb, $"    {indent}                pkt->{name}.data[i].data = NULL;");
+            AppendInvariant(sb, $"    {indent}            }}");
+            AppendInvariant(sb, $"    {indent}        }}");
+            AppendInvariant(sb, $"    {indent}    }} else {{");
+            AppendInvariant(sb, $"    {indent}        pkt->{name}.data = NULL;");
+            AppendInvariant(sb, $"    {indent}    }}");
+            AppendInvariant(sb, $"    {indent}}}");
+        }
+        else if (field.CType.EndsWith("Array", StringComparison.Ordinal))
+        {
+            string elemCType = GetArrayElementCType(field.CType);
+            AppendInvariant(sb, $"    {indent}{{");
+            AppendInvariant(sb, $"    {indent}    if ((size_t)(ptr - buf) + 4 > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}    int32_t cnt = 0;");
+            AppendInvariant(sb, $"    {indent}    memcpy(&cnt, ptr, 4); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}    pkt->{name}.count = cnt;");
+            AppendInvariant(sb, $"    {indent}    if (cnt > 0) {{");
+            AppendInvariant(sb, $"    {indent}        size_t total_bytes = (size_t)cnt * sizeof({elemCType});");
+            AppendInvariant(sb, $"    {indent}        if ((size_t)(ptr - buf) + total_bytes > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}        pkt->{name}.data = ({elemCType}*)malloc(total_bytes);");
+            AppendInvariant(sb, $"    {indent}        if (!pkt->{name}.data) return 0;");
+            AppendInvariant(sb, $"    {indent}        memcpy(pkt->{name}.data, ptr, total_bytes); ptr += total_bytes;");
             AppendInvariant(sb, $"    {indent}    }} else {{");
             AppendInvariant(sb, $"    {indent}        pkt->{name}.data = NULL;");
             AppendInvariant(sb, $"    {indent}    }}");
@@ -460,7 +589,21 @@ public sealed class CGenerator : ICodeGenerator
         if (field.CType == ProtocolConstants.StringCType)
         {
             AppendInvariant(sb, $"    {indent}if (a->{name}.length != b->{name}.length) return false;");
-            AppendInvariant(sb, $"    {indent}if (a->{name}.length > 0 && memcmp(a->{name}.data, b->{name}.data, a->{name}.length) != 0) return false;");
+            AppendInvariant(sb, $"    {indent}if (a->{name}.length > 0 && memcmp(a->{name}.data, b->{name}.data, (size_t)a->{name}.length) != 0) return false;");
+        }
+        else if (field.CType == "StringArray")
+        {
+            AppendInvariant(sb, $"    {indent}if (a->{name}.count != b->{name}.count) return false;");
+            AppendInvariant(sb, $"    {indent}for (int32_t i = 0; i < a->{name}.count; i++) {{");
+            AppendInvariant(sb, $"    {indent}    if (a->{name}.data[i].length != b->{name}.data[i].length) return false;");
+            AppendInvariant(sb, $"    {indent}    if (a->{name}.data[i].length > 0 && memcmp(a->{name}.data[i].data, b->{name}.data[i].data, (size_t)a->{name}.data[i].length) != 0) return false;");
+            AppendInvariant(sb, $"    {indent}}}");
+        }
+        else if (field.CType.EndsWith("Array", StringComparison.Ordinal))
+        {
+            string elemCType = GetArrayElementCType(field.CType);
+            AppendInvariant(sb, $"    {indent}if (a->{name}.count != b->{name}.count) return false;");
+            AppendInvariant(sb, $"    {indent}if (a->{name}.count > 0 && memcmp(a->{name}.data, b->{name}.data, (size_t)a->{name}.count * sizeof({elemCType})) != 0) return false;");
         }
         else if (field.CSharpType.Contains(ProtocolConstants.PacketHeaderName, StringComparison.Ordinal))
         {
@@ -486,7 +629,7 @@ public sealed class CGenerator : ICodeGenerator
             {
                 size += 1;
             }
-            else if (f.CType == ProtocolConstants.StringCType)
+            else if (f.CType == ProtocolConstants.StringCType || f.CType.EndsWith("Array", StringComparison.Ordinal))
             {
                 size += 4;
             }
@@ -497,6 +640,36 @@ public sealed class CGenerator : ICodeGenerator
         }
         return size;
     }
+
+    private static string GetArrayElementCType(string arrayCType) => arrayCType switch
+    {
+        "ByteArray" => "uint8_t",
+        "Int8Array" => "int8_t",
+        "Int16Array" => "int16_t",
+        "UInt16Array" => "uint16_t",
+        "Int32Array" => "int32_t",
+        "UInt32Array" => "uint32_t",
+        "Int64Array" => "int64_t",
+        "UInt64Array" => "uint64_t",
+        "FloatArray" => "float",
+        "DoubleArray" => "double",
+        _ => "uint8_t"
+    };
+
+    private static string GetArrayFreeHelper(string arrayCType) => arrayCType switch
+    {
+        "ByteArray" => "byte_array_free",
+        "Int8Array" => "int8_array_free",
+        "Int16Array" => "int16_array_free",
+        "UInt16Array" => "uint16_array_free",
+        "Int32Array" => "int32_array_free",
+        "UInt32Array" => "uint32_array_free",
+        "Int64Array" => "int64_array_free",
+        "UInt64Array" => "uint64_array_free",
+        "FloatArray" => "float_array_free",
+        "DoubleArray" => "double_array_free",
+        _ => "byte_array_free"
+    };
 
     private static string GenerateTests(IReadOnlyList<PacketSchema> packets)
     {
@@ -586,7 +759,7 @@ public sealed class CGenerator : ICodeGenerator
             return $"{{{{ 0x{index + 1:X2} }}}}";
         }
 
-        if (field.CType == ProtocolConstants.StringCType)
+        if (field.CType == ProtocolConstants.StringCType || field.CType.EndsWith("Array", StringComparison.Ordinal))
         {
             return "{ 0, NULL }";
         }

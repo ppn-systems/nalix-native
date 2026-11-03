@@ -19,4 +19,5 @@ public static class ContractMetadata
     public const string PacketBaseNamespace = "Nalix.Codec.DataFrames";
     public const string PacketBaseName = "PacketBase";
     public const string IPacketStaticOpcode = "Nalix.Abstractions.Networking.Packets.IPacketStaticOpcode";
+    public const string PacketOpcodeAttribute = "Nalix.Abstractions.Networking.Packets.PacketOpcodeAttribute";
 }

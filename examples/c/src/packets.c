@@ -6,6 +6,28 @@ void nalix_string_free(NalixString* s) {
     if (s && s->data) { free(s->data); s->data = NULL; s->length = 0; }
 }
 
+void byte_array_free(ByteArray* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void int8_array_free(Int8Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void int16_array_free(Int16Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void uint16_array_free(UInt16Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void int32_array_free(Int32Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void uint32_array_free(UInt32Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void int64_array_free(Int64Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void uint64_array_free(UInt64Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void float_array_free(FloatArray* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void double_array_free(DoubleArray* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+
+void string_array_free(StringArray* arr) {
+    if (arr && arr->data) {
+        for (int32_t i = 0; i < arr->count; i++) {
+            nalix_string_free(&arr->data[i]);
+        }
+        free(arr->data);
+        arr->data = NULL;
+        arr->count = 0;
+    }
+}
+
 size_t packet_header_serialize(const PacketHeader* header, uint8_t* buf, size_t buf_size)
 {
     if (!header || !buf || buf_size < PACKET_HEADER_SIZE) return 0;

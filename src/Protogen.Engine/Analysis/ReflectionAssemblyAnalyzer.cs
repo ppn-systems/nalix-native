@@ -119,7 +119,7 @@ public sealed class ReflectionAssemblyAnalyzer : IContractAnalyzer
                 Order: order,
                 IsHeader: isHeader,
                 Size: TypeResolver.GetTypeSizeFromReflection(effectiveType),
-                IsUnmanaged: effectiveType.IsValueType,
+                IsUnmanaged: effectiveType.IsValueType && !effectiveType.IsArray && TypeResolver.GetTypeSizeFromReflection(effectiveType) > 0,
                 IsNullable: isNullable,
                 Comment: null
             ));
@@ -137,7 +137,7 @@ public sealed class ReflectionAssemblyAnalyzer : IContractAnalyzer
             FullName: type.FullName ?? type.Name,
             OpCode: opCode,
             Fields: fields,
-            IsFixedSize: !fields.Any(f => f.Size == 0 || f.CType == ProtocolConstants.StringCType),
+            IsFixedSize: !fields.Any(f => f.Size == 0 || f.CType == ProtocolConstants.StringCType || f.CType.EndsWith("Array", StringComparison.Ordinal) || f.IsNullable),
             FixedSize: 0
         );
     }
@@ -168,6 +168,6 @@ public sealed class ReflectionAssemblyAnalyzer : IContractAnalyzer
     private static bool HasPacketAttribute(Type type)
     {
         return type.GetCustomAttributes()
-                   .Any(a => a.GetType().Name == "PacketAttribute");
+                   .Any(a => a.GetType().Name is "PacketAttribute" or "Packet");
     }
 }

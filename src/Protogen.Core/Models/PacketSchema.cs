@@ -1,6 +1,8 @@
 // Copyright (c) 2026 PPN Corporation. All rights reserved.
 // Licensed under the Apache License, Version 2.0.
 
+using Protogen.Core.Constants;
+
 namespace Protogen.Core.Models;
 
 /// <summary>
@@ -28,7 +30,11 @@ public sealed record PacketSchema(
     }
 
     /// <summary>
-    /// Indicates whether the packet contains dynamic or variable-length fields (e.g. string, nullable).
+    /// Indicates whether the packet contains dynamic or variable-length fields (e.g. string, arrays, nullable).
     /// </summary>
-    public bool HasVariableFields => this.Fields.Any(f => f.CType == "NalixString" || f.IsNullable);
+    public bool HasVariableFields => this.Fields.Any(f =>
+        f.CType == ProtocolConstants.StringCType ||
+        f.CType.EndsWith("Array", StringComparison.Ordinal) ||
+        f.IsNullable ||
+        f.Size == 0);
 }

@@ -221,7 +221,7 @@ public sealed class RustGenerator : ICodeGenerator
             {
                 size += 1;
             }
-            else if (f.CType == ProtocolConstants.StringCType)
+            else if (f.CType == ProtocolConstants.StringCType || f.CType.EndsWith("Array", StringComparison.Ordinal) || f.RustType.StartsWith("Vec<", StringComparison.Ordinal))
             {
                 size += 4;
             }
@@ -266,12 +266,40 @@ public sealed class RustGenerator : ICodeGenerator
             AppendInvariant(sb, $"{indent}buf[offset..offset+{size}].copy_from_slice({valRef});");
             AppendInvariant(sb, $"{indent}offset += {size};");
         }
+        else if (field.RustType == "Vec<Vec<u8>>")
+        {
+            AppendInvariant(sb, $"{indent}let cnt = {valDeref}.len() as i32;");
+            AppendInvariant(sb, $"{indent}if offset + 4 > buf.len() {{ return Err(()); }}");
+            AppendInvariant(sb, $"{indent}buf[offset..offset+4].copy_from_slice(&cnt.to_le_bytes());");
+            AppendInvariant(sb, $"{indent}offset += 4;");
+            AppendInvariant(sb, $"{indent}for s in &{valDeref} {{");
+            AppendInvariant(sb, $"{indent}    let slen = s.len() as i32;");
+            AppendInvariant(sb, $"{indent}    if offset + 4 + s.len() > buf.len() {{ return Err(()); }}");
+            AppendInvariant(sb, $"{indent}    buf[offset..offset+4].copy_from_slice(&slen.to_le_bytes());");
+            AppendInvariant(sb, $"{indent}    offset += 4;");
+            AppendInvariant(sb, $"{indent}    buf[offset..offset+s.len()].copy_from_slice(s);");
+            AppendInvariant(sb, $"{indent}    offset += s.len();");
+            AppendInvariant(sb, $"{indent}}}");
+        }
         else if (cs == "string" || cs == "System.String" || field.RustType == "Vec<u8>")
         {
             AppendInvariant(sb, $"{indent}let slen = {valDeref}.len() as i32;");
             AppendInvariant(sb, $"{indent}buf[offset..offset+4].copy_from_slice(&slen.to_le_bytes());");
             AppendInvariant(sb, $"{indent}offset += 4;");
             AppendInvariant(sb, $"{indent}if slen > 0 {{ buf[offset..offset+slen as usize].copy_from_slice({valRef}); offset += slen as usize; }}");
+        }
+        else if (field.RustType.StartsWith("Vec<", StringComparison.Ordinal))
+        {
+            string elemType = field.RustType.Substring(4, field.RustType.Length - 5);
+            AppendInvariant(sb, $"{indent}let cnt = {valDeref}.len() as i32;");
+            AppendInvariant(sb, $"{indent}let elem_size = std::mem::size_of::<{elemType}>();");
+            AppendInvariant(sb, $"{indent}if offset + 4 + ({valDeref}.len() * elem_size) > buf.len() {{ return Err(()); }}");
+            AppendInvariant(sb, $"{indent}buf[offset..offset+4].copy_from_slice(&cnt.to_le_bytes());");
+            AppendInvariant(sb, $"{indent}offset += 4;");
+            AppendInvariant(sb, $"{indent}for item in &{valDeref} {{");
+            AppendInvariant(sb, $"{indent}    buf[offset..offset+elem_size].copy_from_slice(&item.to_le_bytes());");
+            AppendInvariant(sb, $"{indent}    offset += elem_size;");
+            AppendInvariant(sb, $"{indent}}}");
         }
         else if (size == 1)
         {
@@ -344,6 +372,53 @@ public sealed class RustGenerator : ICodeGenerator
             }
             AppendInvariant(sb, $"{indent}offset += {size};");
         }
+        else if (field.RustType == "Vec<Vec<u8>>")
+        {
+            AppendInvariant(sb, $"{indent}let cnt = i32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());");
+            AppendInvariant(sb, $"{indent}offset += 4;");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}let mut val = Vec::new();");
+            }
+            AppendInvariant(sb, $"{indent}if cnt > 0 {{");
+            AppendInvariant(sb, $"{indent}    let elem_count = cnt as usize;");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}    val.reserve(elem_count);");
+            }
+            else
+            {
+                AppendInvariant(sb, $"{indent}    {obj}.{snake}.reserve(elem_count);");
+            }
+            AppendInvariant(sb, $"{indent}    for _ in 0..elem_count {{");
+            AppendInvariant(sb, $"{indent}        if offset + 4 > buf.len() {{ return Err(()); }}");
+            AppendInvariant(sb, $"{indent}        let slen = i32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());");
+            AppendInvariant(sb, $"{indent}        offset += 4;");
+            AppendInvariant(sb, $"{indent}        if slen > 0 {{");
+            AppendInvariant(sb, $"{indent}            let ulen = slen as usize;");
+            AppendInvariant(sb, $"{indent}            if offset + ulen > buf.len() {{ return Err(()); }}");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}            val.push(buf[offset..offset+ulen].to_vec());");
+            }
+            else
+            {
+                AppendInvariant(sb, $"{indent}            {obj}.{snake}.push(buf[offset..offset+ulen].to_vec());");
+            }
+            AppendInvariant(sb, $"{indent}            offset += ulen;");
+            AppendInvariant(sb, $"{indent}        }} else {{");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}            val.push(Vec::new());");
+            }
+            else
+            {
+                AppendInvariant(sb, $"{indent}            {obj}.{snake}.push(Vec::new());");
+            }
+            AppendInvariant(sb, $"{indent}        }}");
+            AppendInvariant(sb, $"{indent}    }}");
+            AppendInvariant(sb, $"{indent}}}");
+        }
         else if (cs == "string" || cs == "System.String" || field.RustType == "Vec<u8>")
         {
             AppendInvariant(sb, $"{indent}let slen = i32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());");
@@ -363,6 +438,41 @@ public sealed class RustGenerator : ICodeGenerator
                 AppendInvariant(sb, $"{indent}    {target} = buf[offset..offset+slen as usize].to_vec();");
             }
             AppendInvariant(sb, $"{indent}    offset += slen as usize;");
+            AppendInvariant(sb, $"{indent}}}");
+        }
+        else if (field.RustType.StartsWith("Vec<", StringComparison.Ordinal))
+        {
+            string elemType = field.RustType.Substring(4, field.RustType.Length - 5);
+            AppendInvariant(sb, $"{indent}let cnt = i32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());");
+            AppendInvariant(sb, $"{indent}offset += 4;");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}let mut val = Vec::new();");
+            }
+            AppendInvariant(sb, $"{indent}if cnt > 0 {{");
+            AppendInvariant(sb, $"{indent}    let elem_count = cnt as usize;");
+            AppendInvariant(sb, $"{indent}    let elem_size = std::mem::size_of::<{elemType}>();");
+            AppendInvariant(sb, $"{indent}    if offset + (elem_count * elem_size) > buf.len() {{ return Err(()); }}");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}    val.reserve(elem_count);");
+            }
+            else
+            {
+                AppendInvariant(sb, $"{indent}    {obj}.{snake}.reserve(elem_count);");
+            }
+            AppendInvariant(sb, $"{indent}    for _ in 0..elem_count {{");
+            AppendInvariant(sb, $"{indent}        let item = {elemType}::from_le_bytes(buf[offset..offset+elem_size].try_into().unwrap());");
+            AppendInvariant(sb, $"{indent}        offset += elem_size;");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}        val.push(item);");
+            }
+            else
+            {
+                AppendInvariant(sb, $"{indent}        {obj}.{snake}.push(item);");
+            }
+            AppendInvariant(sb, $"{indent}    }}");
             AppendInvariant(sb, $"{indent}}}");
         }
         else if (size == 1)
@@ -467,7 +577,7 @@ public sealed class RustGenerator : ICodeGenerator
         string rustType = field.RustType;
         string val = "";
 
-        if (rustType == "Vec<u8>")
+        if (rustType == "Vec<Vec<u8>>" || rustType.StartsWith("Vec<", StringComparison.Ordinal))
         {
             val = "vec![]";
         }

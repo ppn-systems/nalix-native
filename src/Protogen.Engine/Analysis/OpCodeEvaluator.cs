@@ -9,20 +9,41 @@ namespace Protogen.Engine.Analysis;
 
 /// <summary>
 /// Domain service responsible for extracting the static OpCode from packet declarations.
+/// Supports IPacketStaticOpcode, PacketOpcodeAttribute, and static/const OpCode declarations.
 /// </summary>
 public static class OpCodeEvaluator
 {
     /// <summary>
-    /// Evaluates the StaticOpCode property from a Roslyn type symbol.
+    /// Evaluates the OpCode from a Roslyn type symbol.
     /// </summary>
     public static ushort Evaluate(INamedTypeSymbol symbol, SemanticModel semanticModel)
     {
         ArgumentNullException.ThrowIfNull(symbol);
         ArgumentNullException.ThrowIfNull(semanticModel);
 
-        IPropertySymbol? prop = symbol.GetMembers("StaticOpCode")
+        // 1. Check [PacketOpcode(ushort/enum)] attribute
+        AttributeData? opcodeAttr = symbol.GetAttributes()
+            .FirstOrDefault(a => a.AttributeClass?.Name is "PacketOpcode" or "PacketOpcodeAttribute");
+        if (opcodeAttr is { ConstructorArguments.Length: > 0 } && opcodeAttr.ConstructorArguments[0].Value is object attrVal)
+        {
+            ushort? parsed = ToUInt16(attrVal);
+            if (parsed.HasValue) return parsed.Value;
+        }
+
+        // 2. Check const fields: StaticOpCode, OpCode, OpCodeValue, OPCODE
+        IFieldSymbol? constField = symbol.GetMembers()
+            .OfType<IFieldSymbol>()
+            .FirstOrDefault(f => f.IsConst && f.Name is "StaticOpCode" or "OpCode" or "OpCodeValue" or "OPCODE");
+        if (constField?.ConstantValue != null)
+        {
+            ushort? parsed = ToUInt16(constField.ConstantValue);
+            if (parsed.HasValue) return parsed.Value;
+        }
+
+        // 3. Check static property: StaticOpCode, OpCode
+        IPropertySymbol? prop = symbol.GetMembers()
             .OfType<IPropertySymbol>()
-            .FirstOrDefault(static p => p.IsStatic);
+            .FirstOrDefault(static p => p.IsStatic && p.Name is "StaticOpCode" or "OpCode");
 
         if (prop is null)
         {
@@ -60,37 +81,70 @@ public static class OpCodeEvaluator
                 continue;
             }
 
-            switch (constant.Value)
-            {
-                case ushort u: return u;
-                case int i and >= 0 and <= ushort.MaxValue: return (ushort)i;
-                case short s and >= 0: return (ushort)s;
-                case byte b: return b;
-                case uint ui and <= ushort.MaxValue: return (ushort)ui;
-            }
+            ushort? parsed = ToUInt16(constant.Value);
+            if (parsed.HasValue) return parsed.Value;
         }
 
         return 0;
     }
 
     /// <summary>
-    /// Evaluates the StaticOpCode property from an unmanaged reflection Type.
+    /// Evaluates the OpCode from an unmanaged reflection Type.
     /// </summary>
     public static ushort Evaluate(Type type)
     {
         ArgumentNullException.ThrowIfNull(type);
 
-        PropertyInfo? prop = type.GetProperty("StaticOpCode", BindingFlags.Public | BindingFlags.Static);
-        if (prop is null) return 0;
-        object? val = prop.GetValue(null);
-        return val switch
+        // 1. PacketOpcodeAttribute
+        CustomAttributeData? attr = type.CustomAttributes
+            .FirstOrDefault(a => a.AttributeType.Name is "PacketOpcode" or "PacketOpcodeAttribute");
+        if (attr != null && attr.ConstructorArguments.Count > 0 && attr.ConstructorArguments[0].Value != null)
         {
-            ushort u => u,
-            int i and >= 0 and <= ushort.MaxValue => (ushort)i,
-            short s and >= 0 => (ushort)s,
-            byte b => b,
-            uint ui and <= ushort.MaxValue => (ushort)ui,
-            _ => 0
-        };
+            ushort? parsed = ToUInt16(attr.ConstructorArguments[0].Value);
+            if (parsed.HasValue) return parsed.Value;
+        }
+
+        // 2. Static properties: StaticOpCode, OpCode
+        PropertyInfo? prop = type.GetProperty("StaticOpCode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            ?? type.GetProperty("OpCode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+        if (prop != null)
+        {
+            object? val = prop.GetValue(null);
+            if (val != null)
+            {
+                ushort? parsed = ToUInt16(val);
+                if (parsed.HasValue) return parsed.Value;
+            }
+        }
+
+        // 3. Const or static fields: StaticOpCode, OpCode, OpCodeValue, OPCODE
+        FieldInfo? field = type.GetField("StaticOpCode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            ?? type.GetField("OpCode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            ?? type.GetField("OpCodeValue", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            ?? type.GetField("OPCODE", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+        if (field != null)
+        {
+            object? val = field.GetValue(null);
+            if (val != null)
+            {
+                ushort? parsed = ToUInt16(val);
+                if (parsed.HasValue) return parsed.Value;
+            }
+        }
+
+        return 0;
     }
+
+    private static ushort? ToUInt16(object? val) => val switch
+    {
+        ushort u => u,
+        int i and >= 0 and <= ushort.MaxValue => (ushort)i,
+        short s and >= 0 => (ushort)s,
+        byte b => b,
+        sbyte sb and >= 0 => (ushort)sb,
+        uint ui and <= ushort.MaxValue => (ushort)ui,
+        long l and >= 0 and <= ushort.MaxValue => (ushort)l,
+        ulong ul and <= ushort.MaxValue => (ushort)ul,
+        _ => null
+    };
 }

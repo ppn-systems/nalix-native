@@ -54,4 +54,28 @@ public sealed class RustGeneratorTests
         Assert.Contains("pub r#match: u32", module.Content, StringComparison.Ordinal);
         Assert.Contains("#[repr(C)]", module.Content, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Generate_WithCollectionFields_EmitsVecHandling()
+    {
+        PacketSchema packet = new(
+            Name: "CollectionPacket",
+            FullName: "Protocol.CollectionPacket",
+            OpCode: 0x0103,
+            Fields:
+            [
+                new FieldSchema("Scores", "int[]", "Int32Array", "Vec<i32>", 0, false, 0, false, false, null),
+                new FieldSchema("Tags", "string[]", "StringArray", "Vec<Vec<u8>>", 1, false, 0, false, false, null)
+            ],
+            IsFixedSize: false,
+            FixedSize: 0);
+
+        IReadOnlyList<GeneratedFile> files = _generator.Generate([packet]);
+        GeneratedFile module = files.First(f => f.FileName == "packets.rs");
+
+        Assert.Contains("pub scores: Vec<i32>,", module.Content, StringComparison.Ordinal);
+        Assert.Contains("pub tags: Vec<Vec<u8>>,", module.Content, StringComparison.Ordinal);
+        Assert.Contains("pkt.scores.reserve(elem_count);", module.Content, StringComparison.Ordinal);
+        Assert.Contains("pkt.tags.reserve(elem_count);", module.Content, StringComparison.Ordinal);
+    }
 }

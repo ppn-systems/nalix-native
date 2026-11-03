@@ -67,6 +67,8 @@ To guarantee byte-level wire interoperability across .NET, C, and Rust, types ma
 | :--- | :--- | :--- | :--- | :--- |
 | `DateTime` | `int64_t` | `i64` | 8 | 64-bit signed integer Ticks (little-endian) |
 | `TimeSpan` | `int64_t` | `i64` | 8 | 64-bit signed integer Ticks (little-endian) |
+| `DateOnly` | `int32_t` | `i32` | 4 | 32-bit signed integer day count (little-endian) |
+| `TimeOnly` | `int64_t` | `i64` | 8 | 64-bit signed integer Ticks (little-endian) |
 | `DateTimeOffset` | `DateTimeOffset` | `[u8; 16]` | 16 | 64-bit Ticks + 16-bit offset minutes |
 | `Guid` | `Guid` | `[u8; 16]` | 16 | 16-byte raw UUID / GUID binary |
 
@@ -90,6 +92,12 @@ Enumerations are serialized using the size and signedness of their underlying pr
 | `byte[]` | `NalixString` | `Vec<u8>` | 4 bytes | N bytes | `[int32_t length][raw payload bytes]` |
 | `ReadOnlyMemory<byte>` | `NalixString` | `Vec<u8>` | 4 bytes | N bytes | `[int32_t length][raw payload bytes]` |
 | `Memory<byte>` | `NalixString` | `Vec<u8>` | 4 bytes | N bytes | `[int32_t length][raw payload bytes]` |
+| `int[]` / `List<int>` | `Int32Array` | `Vec<i32>` | 4 bytes | N * 4 bytes | `[int32_t count][count * 4 bytes]` |
+| `float[]` / `List<float>` | `FloatArray` | `Vec<f32>` | 4 bytes | N * 4 bytes | `[int32_t count][count * 4 bytes]` |
+| `double[]` / `List<double>` | `DoubleArray` | `Vec<f64>` | 4 bytes | N * 8 bytes | `[int32_t count][count * 8 bytes]` |
+| `long[]` / `List<long>` | `Int64Array` | `Vec<i64>` | 4 bytes | N * 8 bytes | `[int32_t count][count * 8 bytes]` |
+| `short[]` / `List<short>` | `Int16Array` | `Vec<i16>` | 4 bytes | N * 2 bytes | `[int32_t count][count * 2 bytes]` |
+| `string[]` / `List<string>` | `StringArray` | `Vec<Vec<u8>>` | 4 bytes | Dynamic | `[int32_t count][string 0]...[string N-1]` |
 | `T?` (`Nullable<T>`) | `has_val + val` | `Option<T>` | 1 + size | 0 bytes | `[uint8_t has_value][payload if has_value == 1]` |
 
 #### 2.5.1 String & Binary Buffer Wire Encoding Rules
@@ -98,6 +106,14 @@ Enumerations are serialized using the size and signedness of their underlying pr
 3. If `length == 0`, the value represents an empty string `""` or 0-length buffer. Zero payload bytes follow.
 4. If `length > 0`, the prefix is immediately followed by exactly `length` bytes of raw payload.
 5. In C implementations, deserialization allocates memory via `malloc()`. The caller must free this memory via `<packet>_free()`.
+
+#### 2.5.2 Array & Collection Wire Encoding Rules
+1. All linear collections (`T[]`, `List<T>`, `HashSet<T>`, `Queue<T>`, `Stack<T>`) serialize with a signed 32-bit integer count prefix (`int32_t` in little-endian order).
+2. If `count == -1`, the collection is encoded as `null`. Zero element bytes follow.
+3. If `count == 0`, the collection is encoded as empty. Zero element bytes follow.
+4. For unmanaged types (`int`, `float`, `double`, `short`, `byte`, enums), the count is followed by a contiguous memory block of `count * sizeof(T)` bytes in little-endian byte order.
+5. For variable-length element types (`string[]`, `List<string>`), each element is sequentially encoded as `[int32_t length][raw UTF-8 bytes]`.
+6. In C implementations, array data is allocated via `malloc()`. Memory must be released via `<type>_array_free()` or `<packet>_free()`.
 
 ---
 

@@ -100,19 +100,22 @@ public sealed class RoslynProjectAnalyzer : IContractAnalyzer
             }
         }
 
-        if (InheritsPacketBaseOfSelf(symbol) && !fields.Any(f => f.CType == ProtocolConstants.PacketHeaderName || f.CSharpType.Contains(ProtocolConstants.PacketHeaderName, StringComparison.Ordinal)))
+        if ((InheritsPacketBaseOfSelf(symbol) || IsPacket(symbol)) && !fields.Any(f => f.CType == ProtocolConstants.PacketHeaderName || f.CSharpType.Contains(ProtocolConstants.PacketHeaderName, StringComparison.Ordinal)))
         {
             fields.Insert(0, new FieldSchema("Header", ProtocolConstants.PacketHeaderFullName, ProtocolConstants.PacketHeaderName, ProtocolConstants.PacketHeaderName, -1, true, ProtocolConstants.PacketHeaderSize, true, false, "Implicit Packet Header"));
         }
 
         ushort opCode = OpCodeEvaluator.Evaluate(symbol, semanticModel);
 
+        bool isFixed = symbol.AllInterfaces.Any(i => i.ToDisplayString() == ContractMetadata.IFixedSizeSerializable)
+            && !fields.Any(f => f.Size == 0 || f.CType == ProtocolConstants.StringCType || f.CType.EndsWith("Array", StringComparison.Ordinal) || f.IsNullable);
+
         return new PacketSchema(
             Name: symbol.Name,
             FullName: symbol.ToDisplayString(),
             OpCode: opCode,
             Fields: fields,
-            IsFixedSize: symbol.AllInterfaces.Any(i => i.ToDisplayString() == ContractMetadata.IFixedSizeSerializable),
+            IsFixedSize: isFixed,
             FixedSize: 0
         );
     }
@@ -139,7 +142,7 @@ public sealed class RoslynProjectAnalyzer : IContractAnalyzer
         string cType = TypeResolver.ToCType(effectiveType);
         string rustType = TypeResolver.ToRustType(effectiveType);
         int size = TypeResolver.GetTypeSize(effectiveType);
-        bool isUnmanaged = effectiveType.IsUnmanagedType;
+        bool isUnmanaged = effectiveType.IsUnmanagedType && size > 0 && !cType.EndsWith("Array", StringComparison.Ordinal);
         bool isHeader = HasAttribute(member, ContractMetadata.SerializeHeaderAttribute);
         int order = isHeader ? GetOrder(member, ContractMetadata.SerializeHeaderAttribute) : GetOrder(member, ContractMetadata.SerializeOrderAttribute);
 
@@ -233,5 +236,7 @@ public sealed class RoslynProjectAnalyzer : IContractAnalyzer
     }
 
     private static bool IsPacket(INamedTypeSymbol symbol)
-        => symbol.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == ContractMetadata.PacketAttribute) && InheritsPacketBaseOfSelf(symbol);
+        => symbol.GetAttributes().Any(a =>
+            a.AttributeClass?.ToDisplayString() == ContractMetadata.PacketAttribute ||
+            a.AttributeClass?.Name is "PacketAttribute" or "Packet");
 }

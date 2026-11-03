@@ -27,6 +27,19 @@ typedef struct { int64_t date_time; int16_t offset_minutes; } DateTimeOffset;
 // null = length -1, empty = length 0, otherwise [int32_t length][utf8 bytes]
 typedef struct { int32_t length; uint8_t* data; } NalixString;
 
+// Dynamic arrays / collections (matches Nalix wire format [int32_t count][elements...])
+typedef struct { int32_t count; uint8_t* data; } ByteArray;
+typedef struct { int32_t count; int8_t* data; } Int8Array;
+typedef struct { int32_t count; int16_t* data; } Int16Array;
+typedef struct { int32_t count; uint16_t* data; } UInt16Array;
+typedef struct { int32_t count; int32_t* data; } Int32Array;
+typedef struct { int32_t count; uint32_t* data; } UInt32Array;
+typedef struct { int32_t count; int64_t* data; } Int64Array;
+typedef struct { int32_t count; uint64_t* data; } UInt64Array;
+typedef struct { int32_t count; float* data; } FloatArray;
+typedef struct { int32_t count; double* data; } DoubleArray;
+typedef struct { int32_t count; NalixString* data; } StringArray;
+
 // Nalix v14 standard 6-byte packet header
 #define PACKET_HEADER_SIZE 6
 
@@ -50,6 +63,17 @@ extern "C" {
 #endif
 
 void nalix_string_free(NalixString* s);
+void string_array_free(StringArray* arr);
+void byte_array_free(ByteArray* arr);
+void int8_array_free(Int8Array* arr);
+void int16_array_free(Int16Array* arr);
+void uint16_array_free(UInt16Array* arr);
+void int32_array_free(Int32Array* arr);
+void uint32_array_free(UInt32Array* arr);
+void int64_array_free(Int64Array* arr);
+void uint64_array_free(UInt64Array* arr);
+void float_array_free(FloatArray* arr);
+void double_array_free(DoubleArray* arr);
 size_t packet_header_serialize(const PacketHeader* header, uint8_t* buf, size_t buf_size);
 size_t packet_header_deserialize(PacketHeader* header, const uint8_t* buf, size_t buf_size);
 
