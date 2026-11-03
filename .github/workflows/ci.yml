@@ -24,18 +24,26 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
 
     - name: Restore Dependencies
-      run: dotnet restore src/Protogen.slnx
+      run: dotnet restore Nalix.Native.slnx
 
     - name: Build Solution
-      run: dotnet build src/Protogen.slnx -c Release --no-restore
+      run: dotnet build Nalix.Native.slnx -c Release --no-restore
 
-    - name: Run Unit Tests
-      run: dotnet test src/Protogen.slnx -c Release --no-build --verbosity normal
+    - name: Run Protogen Unit Tests
+      run: dotnet test Nalix.Native.slnx -c Release --no-build --verbosity normal
+
+    - name: Run C Client Tests
+      run: |
+        gcc -Wall -Wextra -Iclients/c/include clients/c/src/status.c clients/c/src/packet.c clients/c/src/client.c clients/c/tests/client_test.c -o client_test
+        ./client_test
 
     - name: Run C Binding Tests
       run: |
-        gcc -Iexamples/c/include examples/c/src/packets.c examples/c/tests/packet_test.c -o packet_test
+        gcc -Wall -Wextra -Iexamples/c/include examples/c/src/packets.c examples/c/tests/packet_test.c -o packet_test
         ./packet_test
+
+    - name: Run Rust Client Tests
+      run: cargo test --manifest-path clients/rust/Cargo.toml
 
     - name: Run Rust Binding Tests
       run: cargo test --manifest-path examples/rust/Cargo.toml

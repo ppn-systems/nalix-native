@@ -1,40 +1,84 @@
-# Protogen Architecture Specification
+# Nalix Native Architecture Specification
 
 ## 1. System Overview
 
-Protogen is a domain-driven code generation utility designed to convert C# packet contract declarations into unmanaged, byte-for-byte wire-compatible C and Rust data models.
+Nalix Native is a unified cross-platform native SDK and tooling repository designed for the Nalix binary messaging protocol.
 
-The system is partitioned into three decoupled assemblies adhering to Domain-Driven Design (DDD) layer boundaries and SOLID principles:
+The repository is partitioned into two primary functional components:
+1. **Client SDKs (`clients/`):** Canonical, zero-dependency C99 and Rust client runtime architectures adhering to standard gRPC principles (Status codes, Wire framing, Channel connectivity states, Client lifecycle).
+2. **Protocol Generator (`tools/protogen/`):** A Domain-Driven Design (DDD) utility partitioned into decoupled assemblies adhering to SOLID principles for analyzing C# contracts and generating wire-compatible C and Rust data models.
 
 ```mermaid
 graph TD
-    subgraph Presentation ["Presentation Layer"]
-        CLI["Protogen.Cli (Console Application)"]
+    subgraph Clients ["Native Client SDKs (gRPC Architecture)"]
+        ClientC["C Client SDK (C99 / ESP-IDF / FreeRTOS / POSIX)"]
+        ClientRust["Rust Client SDK (nalix-client)"]
     end
 
-    subgraph Core ["Domain Core (Protogen.Core)"]
-        Contracts["Contracts: IContractAnalyzer, ICodeGenerator"]
-        DomainModels["Models: PacketSchema, FieldSchema, GeneratedFile"]
-        Constants["Constants: ProtocolConstants, ContractMetadata"]
+    subgraph Tooling ["Protocol Code Generator (tools/protogen)"]
+        CLI["Protogen.Cli (Console Executable)"]
+        Core["Protogen.Core (Domain Contracts & Models)"]
+        Engine["Protogen.Engine (Roslyn / Reflection Analyzers & Generators)"]
+        CLI --> Core
+        CLI --> Engine
+        Engine --> Core
     end
 
-    subgraph Engine ["Infrastructure & Engine (Protogen.Engine)"]
-        RoslynAnalyzer["RoslynProjectAnalyzer (MSBuild / Roslyn AST)"]
-        ReflectionAnalyzer["ReflectionAssemblyAnalyzer (.NET Metadata)"]
-        CGen["CGenerator (C99 / ESP-IDF)"]
-        RustGen["RustGenerator (Rust 2021)"]
+    subgraph Outputs ["Generated Outputs & Codecs"]
+        CCodecs["Generated C Codecs (packets.h / packets.c)"]
+        RustCodecs["Generated Rust Codecs (packets.rs)"]
     end
 
-    CLI --> Core
-    CLI --> Engine
-    Engine --> Core
+    Tooling --> Outputs
+    Outputs -.-> Clients
 ```
 
 ---
 
-## 2. Layer Responsibilities
+## 2. Client SDK Architecture (gRPC Standards)
 
-### 2.1 Domain Layer (`Protogen.Core`)
+The client runtime libraries (`clients/c/` and `clients/rust/`) adopt canonical gRPC patterns tailored for high-throughput, low-overhead binary messaging:
+
+### 2.1 Canonical Status Codes
+Error handling strictly maps to the 17 standard gRPC status codes:
+- `0: OK`
+- `1: CANCELLED`
+- `2: UNKNOWN`
+- `3: INVALID_ARGUMENT`
+- `4: DEADLINE_EXCEEDED`
+- `5: NOT_FOUND`
+- `6: ALREADY_EXISTS`
+- `7: PERMISSION_DENIED`
+- `8: RESOURCE_EXHAUSTED`
+- `9: FAILED_PRECONDITION`
+- `10: ABORTED`
+- `11: OUT_OF_RANGE`
+- `12: UNIMPLEMENTED`
+- `13: INTERNAL`
+- `14: UNAVAILABLE`
+- `15: DATA_LOSS`
+- `16: UNAUTHENTICATED`
+
+### 2.2 Nalix v14 Wire Framing
+Every packet consists of a 6-byte Little-Endian binary header followed by an arbitrary payload:
+- `OpCode` (2 bytes, uint16)
+- `Flags` (1 byte, uint8)
+- `Priority` (1 byte, uint8)
+- `SequenceId` (2 bytes, uint16)
+
+### 2.3 Channel Connectivity State Machine
+Channels transition through deterministic states matching the gRPC channel lifecycle:
+- `IDLE`: Initial state before establishing connection or after prolonged inactivity.
+- `CONNECTING`: Attempting transport connection / handshake.
+- `READY`: Connection established and available for packet exchange.
+- `TRANSIENT_FAILURE`: Connection lost or failed handshake, attempting backoff reconnect.
+- `SHUTDOWN`: Channel has been explicitly closed and destroyed.
+
+---
+
+## 3. Protogen Tooling Architecture
+
+### 3.1 Domain Layer (`Protogen.Core`)
 
 The domain layer encapsulates all business logic, invariant verification, and data models of the protocol representation. It has zero dependencies on external NuGet packages or Roslyn compiler libraries.
 
@@ -49,7 +93,7 @@ The domain layer encapsulates all business logic, invariant verification, and da
   - `ProtocolConstants`: Defines fundamental wire protocol characteristics, such as the 6-byte header size and primitive type byte counts.
   - `ContractMetadata`: String identifiers for contract attributes (`[NalixPacket]`, `[Packet]`, `[SerializeOrder]`, `[SerializeHeader]`).
 
-### 2.2 Infrastructure & Engine Layer (`Protogen.Engine`)
+### 3.2 Infrastructure & Engine Layer (`Protogen.Engine`)
 
 The engine layer implements domain contracts for analysis and code generation.
 
@@ -62,7 +106,7 @@ The engine layer implements domain contracts for analysis and code generation.
   - `CGenerator`: Emits C99 headers (`packets.h`), implementations (`packets.c`), and unit test runners (`packet_test.c`).
   - `RustGenerator`: Emits safe Rust modules (`packets.rs`) and round-trip unit test modules (`packets_tests.rs`).
 
-### 2.3 Presentation Layer (`Protogen.Cli`)
+### 3.3 Presentation Layer (`Protogen.Cli`)
 
 The CLI layer is responsible for argument parsing, execution orchestration, and process return codes:
 - Parses command-line arguments.
@@ -71,56 +115,35 @@ The CLI layer is responsible for argument parsing, execution orchestration, and 
 
 ---
 
-## 3. SOLID Design Adherence
+## 4. SOLID Design Adherence
 
-### 3.1 Single Responsibility Principle (SRP)
+### 4.1 Single Responsibility Principle (SRP)
 - `IContractAnalyzer` implementations only extract metadata into domain models.
 - `ICodeGenerator` implementations only transform domain models into target language source strings.
 - `Protogen.Cli` only manages process input, output, and process return codes.
 
-### 3.2 Open/Closed Principle (OCP)
+### 4.2 Open/Closed Principle (OCP)
 The code generation pipeline is open for extension but closed for modification. Adding a new target language (e.g., Go, Python, Swift) requires implementing `ICodeGenerator` without modifying existing analyzers or CLI execution flow.
 
-### 3.3 Liskov Substitution Principle (LSP)
+### 4.3 Liskov Substitution Principle (LSP)
 Both `RoslynProjectAnalyzer` and `ReflectionAssemblyAnalyzer` implement `IContractAnalyzer`. They are fully interchangeable and yield identical `PacketSchema` representations from identical contract definitions.
 
-### 3.4 Interface Segregation Principle (ISP)
+### 4.4 Interface Segregation Principle (ISP)
 Interfaces are narrowly defined:
 - `IContractAnalyzer`: Single asynchronous method `AnalyzeAsync(string targetPath, CancellationToken ct)`.
 - `ICodeGenerator`: Single method `Generate(IReadOnlyList<PacketSchema> packets)`.
 
-### 3.5 Dependency Inversion Principle (DIP)
+### 4.5 Dependency Inversion Principle (DIP)
 High-level modules (the CLI runner) and low-level modules (the generators and analyzers) depend entirely on abstractions defined in `Protogen.Core`, ensuring zero cyclic dependencies and clean testability.
-
----
-
-## 4. Pipeline Execution Lifecycle
-
-```mermaid
-sequenceDiagram
-    participant CLI as Protogen.Cli
-    participant Analyzer as IContractAnalyzer
-    participant Generator as ICodeGenerator
-    participant Disk as File System
-
-    CLI->>Analyzer: AnalyzeAsync(targetPath)
-    Analyzer->>Analyzer: Discover packet types via attributes
-    Analyzer->>Analyzer: Extract StaticOpCode & [SerializeOrder] fields
-    Analyzer-->>CLI: IReadOnlyList<PacketSchema>
-    
-    CLI->>Generator: Generate(packets)
-    Generator-->>CLI: IReadOnlyList<GeneratedFile>
-    CLI->>Disk: Write files to output directories
-```
 
 ---
 
 ## 5. Architecture & Implementation Decisions
 
-### 6.1 Decoupling from Nalix Packages
+### 5.1 Decoupling from Nalix Packages
 Protogen does not reference `Nalix.Codec` or `Nalix.Abstractions` directly. Contract analysis relies on string metadata matching defined in `ContractMetadata`. This ensures the code generator remains functional across Nalix major versions without assembly binding redirects or package lock conflicts.
 
-### 6.2 Microcontroller-Safe Sequential Shift Decoding
+### 5.2 Microcontroller-Safe Sequential Shift Decoding
 Many embedded processors (including Xtensa cores on ESP32, RISC-V cores on ESP32-C3, and ARM Cortex-M0) trigger hardware exceptions on unaligned multi-byte memory access (e.g., `*(uint16_t*)ptr`).
 
 To prevent memory alignment faults:
@@ -131,7 +154,7 @@ To prevent memory alignment faults:
   ```
 This pattern is architecture-agnostic and guarantees determinism across all unaligned memory configurations.
 
-### 6.3 Multi-Compiler Structure Packing
+### 5.3 Multi-Compiler Structure Packing
 Different compiler toolchains employ distinct mechanisms to eliminate structure padding:
 - GCC and Clang support `__attribute__((packed))` and `#pragma pack(push, 1)`.
 - MSVC supports `#pragma pack(push, 1)`.
@@ -153,7 +176,7 @@ typedef struct {
 #endif
 ```
 
-### 6.4 C++ Linkage Compatibility
+### 5.4 C++ Linkage Compatibility
 To support compilation under C++ toolchains (such as Arduino IDE, ESP-IDF C++ components, or native C++ backends), the generated C header encloses all function declarations in an `extern "C"` linkage guard:
 ```c
 #ifdef __cplusplus
