@@ -333,14 +333,14 @@ static void poly_blocks(crypto_poly1305_ctx *ctx, const u8 *in,
 		const u64 s1 = (u64)h1 + load32_le(in);  in += 4;
 		const u64 s2 = (u64)h2 + load32_le(in);  in += 4;
 		const u64 s3 = (u64)h3 + load32_le(in);  in += 4;
-		const u32 s4 =      h4 + end;
+		const u64 s4 = (u64)h4 + end;
 
 		// (h + c) * r, without carry propagation
 		const u64 x0 = s0*r0+ s1*rr3+ s2*rr2+ s3*rr1+ s4*rr0;
 		const u64 x1 = s0*r1+ s1*r0 + s2*rr3+ s3*rr2+ s4*rr1;
 		const u64 x2 = s0*r2+ s1*r1 + s2*r0 + s3*rr3+ s4*rr2;
 		const u64 x3 = s0*r3+ s1*r2 + s2*r1 + s3*r0 + s4*rr3;
-		const u32 x4 =                                s4*rr4;
+		const u32 x4 = (u32)(s4*rr4);
 
 		// partial reduction modulo 2^130 - 5
 		const u32 u5 = (u32)(x3 >> 32) + x4; // u5 <= 7ffffff5

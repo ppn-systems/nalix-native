@@ -19,6 +19,9 @@ concurrency:
   group: ci-client-ts-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   test-ts:
     name: Build & Verify TypeScript Client (Node.js)
