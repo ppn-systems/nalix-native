@@ -16,15 +16,11 @@ static void test_status_codes(void) {
 }
 
 static void test_packet_framing(void) {
-    nalix_packet_t pkt;
-    pkt.header.opcode = 0x1A2B;
+    const uint8_t payload[] = { 0xDE, 0xAD, 0xBE, 0xEF };
+    nalix_packet_t pkt = nalix_packet_create(0x1A2B, payload, sizeof(payload));
     pkt.header.flags = 0x01;
     pkt.header.priority = 0x02;
     pkt.header.sequence_id = 0x0042;
-
-    const uint8_t payload[] = { 0xDE, 0xAD, 0xBE, 0xEF };
-    pkt.payload = payload;
-    pkt.payload_len = sizeof(payload);
 
     uint8_t buffer[64];
     size_t written = 0;
@@ -56,32 +52,32 @@ static void test_packet_framing(void) {
     printf("test_packet_framing passed.\n");
 }
 
-static void test_client_lifecycle(void) {
+static void test_session_lifecycle(void) {
     nalix_channel_config_t config = nalix_channel_config_default("127.0.0.1", 9000);
-    nalix_client_t client;
-    nalix_status_t status = nalix_client_init(&client, &config, NULL);
+    nalix_session_t session;
+    nalix_status_t status = nalix_session_init(&session, &config, NULL);
     assert(nalix_status_is_ok(&status));
-    assert(client.state == NALIX_CHANNEL_IDLE);
+    assert(session.state == NALIX_CHANNEL_IDLE);
 
     /* Connecting to offline port transitions to TRANSIENT_FAILURE */
-    status = nalix_client_connect(&client);
+    status = nalix_session_connect(&session);
     assert(!nalix_status_is_ok(&status));
     assert(status.code == NALIX_STATUS_UNAVAILABLE);
-    assert(client.state == NALIX_CHANNEL_TRANSIENT_FAILURE);
+    assert(session.state == NALIX_CHANNEL_TRANSIENT_FAILURE);
 
-    status = nalix_client_disconnect(&client);
+    status = nalix_session_disconnect(&session);
     assert(nalix_status_is_ok(&status));
-    assert(client.state == NALIX_CHANNEL_SHUTDOWN);
+    assert(session.state == NALIX_CHANNEL_SHUTDOWN);
 
-    nalix_client_destroy(&client);
-    printf("test_client_lifecycle passed.\n");
+    nalix_session_destroy(&session);
+    printf("test_session_lifecycle passed.\n");
 }
 
 int main(void) {
-    printf("--- Running Nalix C Client Tests ---\n");
+    printf("--- Running Nalix C Session Tests ---\n");
     test_status_codes();
     test_packet_framing();
-    test_client_lifecycle();
-    printf("All C Client Tests Passed Successfully.\n");
+    test_session_lifecycle();
+    printf("All C Session Tests Passed Successfully.\n");
     return 0;
 }

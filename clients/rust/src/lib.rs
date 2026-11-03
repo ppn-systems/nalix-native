@@ -1,11 +1,9 @@
 pub mod channel;
-pub mod client;
 pub mod packet;
 pub mod session;
 pub mod status;
 
 pub use channel::{ChannelConfig, ConnectivityState, TransportType};
-pub use client::NalixClient;
 pub use packet::{Packet, PacketHeader, NALIX_HEADER_SIZE};
 pub use session::{TcpSession, TransportSession, WebSocketSession};
 pub use status::{Status, StatusCode};

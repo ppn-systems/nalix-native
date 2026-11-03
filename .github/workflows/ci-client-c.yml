@@ -28,10 +28,10 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Compile and Run C Client Tests
+    - name: Compile and Run C Session Tests
       run: |
-        gcc -Wall -Wextra -Werror -Iclients/c/include clients/c/src/status.c clients/c/src/packet.c clients/c/src/client.c clients/c/tests/client_test.c -o client_test
-        ./client_test
+        gcc -Wall -Wextra -Werror -Iclients/c/include clients/c/src/status.c clients/c/src/packet.c clients/c/src/session.c clients/c/tests/session_test.c -o session_test
+        ./session_test
 
     - name: Compile and Run Generated C Codec Tests
       run: |

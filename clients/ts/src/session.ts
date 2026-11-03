@@ -535,11 +535,3 @@ export class WebSocketSession {
     }
   }
 }
-
-/**
- * Backward compatibility alias.
- */
-export const NalixClient = WebSocketSession;
-export type NalixClient = WebSocketSession;
-export const Session = WebSocketSession;
-export type Session = WebSocketSession;

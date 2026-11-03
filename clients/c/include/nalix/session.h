@@ -1,59 +1,78 @@
 #ifndef NALIX_SESSION_H
 #define NALIX_SESSION_H
 
-#include "nalix/client.h"
+#include "nalix/status.h"
+#include "nalix/packet.h"
+#include "nalix/channel.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * @brief Represents an active transport session in C, matching TransportSession / TcpSession from Nalix C#.
- */
-typedef struct nalix_client nalix_session_t;
+typedef struct nalix_session nalix_session_t;
 typedef nalix_session_t nalix_tcp_session_t;
 
 /**
- * @brief Initializes a transport session with given configuration.
+ * @brief Callback invoked when a packet is received asynchronously on a session.
  */
-static inline nalix_status_t nalix_session_init(
+typedef void (*nalix_session_packet_received_cb)(
+    nalix_session_t* session,
+    const nalix_packet_t* packet,
+    void* user_data
+);
+
+/**
+ * @brief Callback invoked when the session connectivity state changes.
+ */
+typedef void (*nalix_session_state_changed_cb)(
+    nalix_session_t* session,
+    nalix_connectivity_state_t new_state,
+    void* user_data
+);
+
+/**
+ * @brief Nalix transport session representation. Matches TransportSession / TcpSession from Nalix C#.
+ */
+struct nalix_session {
+    nalix_channel_config_t config;
+    nalix_connectivity_state_t state;
+    nalix_session_packet_received_cb on_packet;
+    nalix_session_state_changed_cb on_state;
+    void* user_data;
+    void* transport_handle;
+};
+
+/**
+ * @brief Initializes a Nalix session with given configuration.
+ */
+nalix_status_t nalix_session_init(
     nalix_session_t* session,
     const nalix_channel_config_t* config,
     void* user_data
-) {
-    return nalix_client_init(session, config, user_data);
-}
+);
 
 /**
  * @brief Establishes connection to the configured endpoint.
  */
-static inline nalix_status_t nalix_session_connect(nalix_session_t* session) {
-    return nalix_client_connect(session);
-}
+nalix_status_t nalix_session_connect(nalix_session_t* session);
 
 /**
  * @brief Sends a packet over the active session.
  */
-static inline nalix_status_t nalix_session_send(
+nalix_status_t nalix_session_send(
     nalix_session_t* session,
     const nalix_packet_t* packet
-) {
-    return nalix_client_send(session, packet);
-}
+);
 
 /**
  * @brief Disconnects and shuts down the active session.
  */
-static inline nalix_status_t nalix_session_disconnect(nalix_session_t* session) {
-    return nalix_client_disconnect(session);
-}
+nalix_status_t nalix_session_disconnect(nalix_session_t* session);
 
 /**
  * @brief Destroys and cleans up session resources.
  */
-static inline void nalix_session_destroy(nalix_session_t* session) {
-    nalix_client_destroy(session);
-}
+void nalix_session_destroy(nalix_session_t* session);
 
 #ifdef __cplusplus
 }

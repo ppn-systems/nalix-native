@@ -45,13 +45,25 @@ typedef struct nalix_packet {
 } nalix_packet_t;
 
 /**
+ * @brief High-level helper to initialize a packet with opcode and payload.
+ */
+static inline nalix_packet_t nalix_packet_create(
+    uint16_t opcode,
+    const uint8_t* payload,
+    size_t payload_len
+) {
+    nalix_packet_t pkt;
+    pkt.header.opcode = opcode;
+    pkt.header.flags = 0;
+    pkt.header.priority = 0;
+    pkt.header.sequence_id = 0;
+    pkt.payload = payload;
+    pkt.payload_len = payload_len;
+    return pkt;
+}
+
+/**
  * @brief Encodes a packet into a destination buffer.
- *
- * @param packet Pointer to the packet structure.
- * @param buffer Destination buffer.
- * @param buffer_capacity Capacity of destination buffer in bytes.
- * @param bytes_written Output parameter receiving total bytes encoded.
- * @return nalix_status_t Status of encoding.
  */
 nalix_status_t nalix_packet_encode(
     const nalix_packet_t* packet,
@@ -62,12 +74,6 @@ nalix_status_t nalix_packet_encode(
 
 /**
  * @brief Decodes a packet from a binary wire buffer.
- *
- * @param buffer Pointer to source buffer.
- * @param buffer_len Total bytes available in source buffer.
- * @param packet Output packet receiving decoded header and payload reference.
- * @param bytes_consumed Output parameter receiving total bytes parsed.
- * @return nalix_status_t Status of decoding.
  */
 nalix_status_t nalix_packet_decode(
     const uint8_t* buffer,

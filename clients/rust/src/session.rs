@@ -358,6 +358,3 @@ impl WebSocketSession {
         self.inner.disconnect()
     }
 }
-
-/// Backward compatibility alias.
-pub type NalixClient = TransportSession;

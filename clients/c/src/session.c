@@ -1,4 +1,4 @@
-#include "nalix/client.h"
+#include "nalix/session.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -46,62 +46,62 @@ const char* nalix_connectivity_state_to_string(nalix_connectivity_state_t state)
     }
 }
 
-nalix_status_t nalix_client_init(
-    nalix_client_t* client,
+nalix_status_t nalix_session_init(
+    nalix_session_t* session,
     const nalix_channel_config_t* config,
     void* user_data
 ) {
-    if (!client || !config) {
+    if (!session || !config) {
         return nalix_status_create(NALIX_STATUS_INVALID_ARGUMENT, "Null pointer argument provided");
     }
 
-    memset(client, 0, sizeof(nalix_client_t));
-    client->config = *config;
-    client->state = NALIX_CHANNEL_IDLE;
-    client->user_data = user_data;
-    client->transport_handle = (void*)(intptr_t)NALIX_INVALID_SOCKET;
+    memset(session, 0, sizeof(nalix_session_t));
+    session->config = *config;
+    session->state = NALIX_CHANNEL_IDLE;
+    session->user_data = user_data;
+    session->transport_handle = (void*)(intptr_t)NALIX_INVALID_SOCKET;
     return nalix_status_ok();
 }
 
-nalix_status_t nalix_client_connect(nalix_client_t* client) {
-    if (!client) {
-        return nalix_status_create(NALIX_STATUS_INVALID_ARGUMENT, "Null client pointer");
+nalix_status_t nalix_session_connect(nalix_session_t* session) {
+    if (!session) {
+        return nalix_status_create(NALIX_STATUS_INVALID_ARGUMENT, "Null session pointer");
     }
 
-    if (client->state == NALIX_CHANNEL_READY) {
+    if (session->state == NALIX_CHANNEL_READY) {
         return nalix_status_ok();
     }
 
-    client->state = NALIX_CHANNEL_CONNECTING;
-    if (client->on_state) {
-        client->on_state(client, NALIX_CHANNEL_CONNECTING, client->user_data);
+    session->state = NALIX_CHANNEL_CONNECTING;
+    if (session->on_state) {
+        session->on_state(session, NALIX_CHANNEL_CONNECTING, session->user_data);
     }
 
 #ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        client->state = NALIX_CHANNEL_TRANSIENT_FAILURE;
+        session->state = NALIX_CHANNEL_TRANSIENT_FAILURE;
         return nalix_status_create(NALIX_STATUS_INTERNAL, "WSAStartup failed");
     }
 #endif
 
     nalix_socket_t sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == NALIX_INVALID_SOCKET) {
-        client->state = NALIX_CHANNEL_TRANSIENT_FAILURE;
+        session->state = NALIX_CHANNEL_TRANSIENT_FAILURE;
         return nalix_status_create(NALIX_STATUS_INTERNAL, "Failed to create TCP socket");
     }
 
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(client->config.port);
+    server_addr.sin_port = htons(session->config.port);
 
-    if (inet_pton(AF_INET, client->config.host, &server_addr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, session->config.host, &server_addr.sin_addr) <= 0) {
         /* If not raw IP, resolve hostname */
-        struct hostent* he = gethostbyname(client->config.host);
+        struct hostent* he = gethostbyname(session->config.host);
         if (!he) {
             NALIX_CLOSESOCKET(sock);
-            client->state = NALIX_CHANNEL_TRANSIENT_FAILURE;
+            session->state = NALIX_CHANNEL_TRANSIENT_FAILURE;
             return nalix_status_create(NALIX_STATUS_NOT_FOUND, "Failed to resolve host");
         }
         memcpy(&server_addr.sin_addr, he->h_addr_list[0], he->h_length);
@@ -109,32 +109,32 @@ nalix_status_t nalix_client_connect(nalix_client_t* client) {
 
     if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
         NALIX_CLOSESOCKET(sock);
-        client->state = NALIX_CHANNEL_TRANSIENT_FAILURE;
+        session->state = NALIX_CHANNEL_TRANSIENT_FAILURE;
         return nalix_status_create(NALIX_STATUS_UNAVAILABLE, "Connection refused or unreachable");
     }
 
-    client->transport_handle = (void*)(intptr_t)sock;
-    client->state = NALIX_CHANNEL_READY;
-    if (client->on_state) {
-        client->on_state(client, NALIX_CHANNEL_READY, client->user_data);
+    session->transport_handle = (void*)(intptr_t)sock;
+    session->state = NALIX_CHANNEL_READY;
+    if (session->on_state) {
+        session->on_state(session, NALIX_CHANNEL_READY, session->user_data);
     }
 
     return nalix_status_ok();
 }
 
-nalix_status_t nalix_client_send(
-    nalix_client_t* client,
+nalix_status_t nalix_session_send(
+    nalix_session_t* session,
     const nalix_packet_t* packet
 ) {
-    if (!client || !packet) {
+    if (!session || !packet) {
         return nalix_status_create(NALIX_STATUS_INVALID_ARGUMENT, "Null pointer argument");
     }
 
-    if (client->state != NALIX_CHANNEL_READY) {
-        return nalix_status_create(NALIX_STATUS_UNAVAILABLE, "Channel is not connected");
+    if (session->state != NALIX_CHANNEL_READY) {
+        return nalix_status_create(NALIX_STATUS_UNAVAILABLE, "Session is not connected");
     }
 
-    nalix_socket_t sock = (nalix_socket_t)(intptr_t)client->transport_handle;
+    nalix_socket_t sock = (nalix_socket_t)(intptr_t)session->transport_handle;
     if (sock == NALIX_INVALID_SOCKET) {
         return nalix_status_create(NALIX_STATUS_UNAVAILABLE, "Invalid socket descriptor");
     }
@@ -154,27 +154,27 @@ nalix_status_t nalix_client_send(
     return nalix_status_ok();
 }
 
-nalix_status_t nalix_client_disconnect(nalix_client_t* client) {
-    if (!client) {
-        return nalix_status_create(NALIX_STATUS_INVALID_ARGUMENT, "Null client pointer");
+nalix_status_t nalix_session_disconnect(nalix_session_t* session) {
+    if (!session) {
+        return nalix_status_create(NALIX_STATUS_INVALID_ARGUMENT, "Null session pointer");
     }
 
-    nalix_socket_t sock = (nalix_socket_t)(intptr_t)client->transport_handle;
+    nalix_socket_t sock = (nalix_socket_t)(intptr_t)session->transport_handle;
     if (sock != NALIX_INVALID_SOCKET) {
         NALIX_CLOSESOCKET(sock);
-        client->transport_handle = (void*)(intptr_t)NALIX_INVALID_SOCKET;
+        session->transport_handle = (void*)(intptr_t)NALIX_INVALID_SOCKET;
     }
 
-    client->state = NALIX_CHANNEL_SHUTDOWN;
-    if (client->on_state) {
-        client->on_state(client, NALIX_CHANNEL_SHUTDOWN, client->user_data);
+    session->state = NALIX_CHANNEL_SHUTDOWN;
+    if (session->on_state) {
+        session->on_state(session, NALIX_CHANNEL_SHUTDOWN, session->user_data);
     }
 
     return nalix_status_ok();
 }
 
-void nalix_client_destroy(nalix_client_t* client) {
-    if (!client) return;
-    nalix_client_disconnect(client);
-    memset(client, 0, sizeof(nalix_client_t));
+void nalix_session_destroy(nalix_session_t* session) {
+    if (!session) return;
+    nalix_session_disconnect(session);
+    memset(session, 0, sizeof(nalix_session_t));
 }
