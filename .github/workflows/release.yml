@@ -17,13 +17,13 @@ jobs:
         include:
           - os: windows-latest
             rid: win-x64
-            binary_name: nalix-protogen.exe
+            binary_name: protogen.exe
           - os: ubuntu-latest
             rid: linux-x64
-            binary_name: nalix-protogen
+            binary_name: protogen
           - os: macos-latest
             rid: osx-x64
-            binary_name: nalix-protogen
+            binary_name: protogen
 
     steps:
     - name: Checkout Repository
@@ -36,24 +36,24 @@ jobs:
 
     - name: Publish Single File Binary
       run: |
-        dotnet publish src/Nalix.Protogen.Cli/Nalix.Protogen.Cli.csproj -c Release -r ${{ matrix.rid }} -p:PublishSingleFile=true -p:PublishTrimmed=false --self-contained true -o ./dist/${{ matrix.rid }}
+        dotnet publish src/Protogen.Cli/Protogen.Cli.csproj -c Release -r ${{ matrix.rid }} -p:PublishSingleFile=true -p:PublishTrimmed=false --self-contained true -o ./dist/${{ matrix.rid }}
 
     - name: Zip Binary (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        Compress-Archive -Path ./dist/${{ matrix.rid }}/* -DestinationPath ./nalix-protogen-${{ matrix.rid }}.zip
+        Compress-Archive -Path ./dist/${{ matrix.rid }}/* -DestinationPath ./protogen-${{ matrix.rid }}.zip
 
     - name: Zip Binary (Unix)
       if: matrix.os != 'windows-latest'
       run: |
         chmod +x ./dist/${{ matrix.rid }}/${{ matrix.binary_name }}
-        zip -j nalix-protogen-${{ matrix.rid }}.zip ./dist/${{ matrix.rid }}/${{ matrix.binary_name }}
+        zip -j protogen-${{ matrix.rid }}.zip ./dist/${{ matrix.rid }}/${{ matrix.binary_name }}
 
     - name: Upload Binary Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: nalix-protogen-${{ matrix.rid }}
-        path: nalix-protogen-${{ matrix.rid }}.zip
+        name: protogen-${{ matrix.rid }}
+        path: protogen-${{ matrix.rid }}.zip
 
   create-release:
     name: Create GitHub Release
@@ -72,6 +72,6 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        files: ./artifacts/nalix-protogen-*.zip
+        files: ./artifacts/protogen-*.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

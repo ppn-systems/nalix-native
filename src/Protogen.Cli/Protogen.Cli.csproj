@@ -6,11 +6,12 @@
 		<Nullable>enable</Nullable>
 		<OutputType>Exe</OutputType>
 		<AssemblyName>protogen</AssemblyName>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 	</PropertyGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Nalix.Protogen.Abstractions\Nalix.Protogen.Abstractions.csproj" />
-		<ProjectReference Include="..\Nalix.Protogen.Roslyn\Nalix.Protogen.Roslyn.csproj" />
+		<ProjectReference Include="..\Protogen.Core\Protogen.Core.csproj" />
+		<ProjectReference Include="..\Protogen.Engine\Protogen.Engine.csproj" />
 	</ItemGroup>
 
 </Project>

@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="Nalix.Protogen.Abstractions/Nalix.Protogen.Abstractions.csproj" />
-  <Project Path="Nalix.Protogen.Cli/Nalix.Protogen.Cli.csproj" />
-  <Project Path="Nalix.Protogen.Roslyn/Nalix.Protogen.Roslyn.csproj" Id="01514dea-44c4-46b3-80d1-96baa132a09c" />
-</Solution>

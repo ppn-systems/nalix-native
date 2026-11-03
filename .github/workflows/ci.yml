@@ -7,7 +7,7 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build:
+  build-and-test:
     name: Build and Verify
     runs-on: ubuntu-latest
 
@@ -20,8 +20,22 @@ jobs:
       with:
         dotnet-version: '10.0.x'
 
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+
     - name: Restore Dependencies
-      run: dotnet restore src/Nalix.Protogen.slnx
+      run: dotnet restore src/Protogen.slnx
 
     - name: Build Solution
-      run: dotnet build src/Nalix.Protogen.slnx -c Release --no-restore
+      run: dotnet build src/Protogen.slnx -c Release --no-restore
+
+    - name: Run Unit Tests
+      run: dotnet test src/Protogen.slnx -c Release --no-build --verbosity normal
+
+    - name: Run C Binding Tests
+      run: |
+        gcc -Iexamples/c/include examples/c/src/packets.c examples/c/tests/packet_test.c -o packet_test
+        ./packet_test
+
+    - name: Run Rust Binding Tests
+      run: cargo test --manifest-path examples/rust/Cargo.toml

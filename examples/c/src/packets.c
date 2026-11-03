@@ -6,98 +6,515 @@ void nalix_string_free(NalixString* s) {
     if (s && s->data) { free(s->data); s->data = NULL; s->length = 0; }
 }
 
-size_t observabilityaccess_serialize(const ObservabilityAccess* pkt, uint8_t* buf, size_t buf_size)
-{
-    if (!pkt || !buf || buf_size < 46) return 0;
-    uint8_t* ptr = buf;
+void byte_array_free(ByteArray* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void int8_array_free(Int8Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void int16_array_free(Int16Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void uint16_array_free(UInt16Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void int32_array_free(Int32Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void uint32_array_free(UInt32Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void int64_array_free(Int64Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void uint64_array_free(UInt64Array* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void float_array_free(FloatArray* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
+void double_array_free(DoubleArray* arr) { if (arr && arr->data) { free(arr->data); arr->data = NULL; arr->count = 0; } }
 
-    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    ptr[0] = (uint8_t)pkt->Stage; ptr += 1;
-    ptr[0] = (uint8_t)(pkt->Reason);
-    ptr[1] = (uint8_t)((pkt->Reason) >> 8); ptr += 2;
-    ptr[0] = (uint8_t)pkt->AccessLevel; ptr += 1;
-    memcpy(ptr, pkt->AccessKey.data, 32); ptr += 32;
-    return 46;
-}
-
-size_t observabilityaccess_deserialize(ObservabilityAccess* pkt, const uint8_t* buf, size_t buf_size)
-{
-    if (!pkt || !buf || buf_size < 46) return 0;
-    const uint8_t* ptr = buf;
-
-    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    pkt->Stage = (uint8_t)ptr[0]; ptr += 1;
-    pkt->Reason = (uint16_t)((uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8)); ptr += 2;
-    pkt->AccessLevel = (uint8_t)ptr[0]; ptr += 1;
-    memcpy(pkt->AccessKey.data, ptr, 32); ptr += 32;
-    return 46;
-}
-
-bool observabilityaccess_equals(const ObservabilityAccess* a, const ObservabilityAccess* b)
-{
-    if (!a || !b) return false;
-    return memcmp(a, b, sizeof(ObservabilityAccess)) == 0;
-}
-
-size_t runtimeobservation_serialize(const RuntimeObservation* pkt, uint8_t* buf, size_t buf_size)
-{
-    if (!pkt || !buf || buf_size < 18) return 0;
-    uint8_t* ptr = buf;
-
-    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    ptr[0] = (uint8_t)pkt->Stage; ptr += 1;
-    ptr[0] = (uint8_t)pkt->Target; ptr += 1;
-    ptr[0] = (uint8_t)(pkt->Reason);
-    ptr[1] = (uint8_t)((pkt->Reason) >> 8); ptr += 2;
-    {
-        int32_t slen = pkt->ObservationData.length;
-        if ((size_t)(ptr - buf) + 4 + (slen > 0 ? slen : 0) > buf_size) return 0;
-        memcpy(ptr, &slen, 4); ptr += 4;
-        if (slen > 0 && pkt->ObservationData.data) { memcpy(ptr, pkt->ObservationData.data, slen); ptr += slen; }
-    }
-    return (size_t)(ptr - buf);
-}
-
-size_t runtimeobservation_deserialize(RuntimeObservation* pkt, const uint8_t* buf, size_t buf_size)
-{
-    if (!pkt || !buf || buf_size < 18) return 0;
-    const uint8_t* ptr = buf;
-
-    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    pkt->Stage = (uint8_t)ptr[0]; ptr += 1;
-    pkt->Target = (uint8_t)ptr[0]; ptr += 1;
-    pkt->Reason = (uint16_t)((uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8)); ptr += 2;
-    {
-        int32_t slen;
-        memcpy(&slen, ptr, 4); ptr += 4;
-        pkt->ObservationData.length = slen;
-        if (slen > 0) {
-            if ((size_t)(ptr - buf) + slen > buf_size) return 0;
-            pkt->ObservationData.data = (uint8_t*)malloc(slen);
-            memcpy(pkt->ObservationData.data, ptr, slen);
-            ptr += slen;
-        } else {
-            pkt->ObservationData.data = NULL;
+void string_array_free(StringArray* arr) {
+    if (arr && arr->data) {
+        for (int32_t i = 0; i < arr->count; i++) {
+            nalix_string_free(&arr->data[i]);
         }
+        free(arr->data);
+        arr->data = NULL;
+        arr->count = 0;
     }
-    return (size_t)(ptr - buf);
 }
 
-bool runtimeobservation_equals(const RuntimeObservation* a, const RuntimeObservation* b)
+size_t packet_header_serialize(const PacketHeader* header, uint8_t* buf, size_t buf_size)
 {
-    if (!a || !b) return false;
-    if (memcmp(&a->Header, &b->Header, PACKET_HEADER_SIZE) != 0) return false;
-    if (memcmp(&a->Stage, &b->Stage, 1) != 0) return false;
-    if (memcmp(&a->Target, &b->Target, 1) != 0) return false;
-    if (memcmp(&a->Reason, &b->Reason, 2) != 0) return false;
-    if (a->ObservationData.length != b->ObservationData.length) return false;
-    if (a->ObservationData.length > 0 && memcmp(a->ObservationData.data, b->ObservationData.data, a->ObservationData.length) != 0) return false;
-    return true;
+    if (!header || !buf || buf_size < PACKET_HEADER_SIZE) return 0;
+    buf[0] = (uint8_t)(header->OpCode & 0xFF);
+    buf[1] = (uint8_t)((header->OpCode >> 8) & 0xFF);
+    buf[2] = header->Flags;
+    buf[3] = header->Priority;
+    buf[4] = (uint8_t)(header->SequenceId & 0xFF);
+    buf[5] = (uint8_t)((header->SequenceId >> 8) & 0xFF);
+    return PACKET_HEADER_SIZE;
 }
 
-void runtimeobservation_free(RuntimeObservation* pkt)
+size_t packet_header_deserialize(PacketHeader* header, const uint8_t* buf, size_t buf_size)
+{
+    if (!header || !buf || buf_size < PACKET_HEADER_SIZE) return 0;
+    header->OpCode = (uint16_t)(buf[0] | ((uint16_t)buf[1] << 8));
+    header->Flags = buf[2];
+    header->Priority = buf[3];
+    header->SequenceId = (uint16_t)(buf[4] | ((uint16_t)buf[5] << 8));
+    return PACKET_HEADER_SIZE;
+}
+
+void control_init(Control* pkt)
 {
     if (!pkt) return;
-    nalix_string_free(&pkt->ObservationData);
+    memset(pkt, 0, sizeof(Control));
+    pkt->Header.OpCode = PACKET_CONTROL_OPCODE;
+}
+
+size_t control_serialize(const Control* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 9) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    ptr[0] = (uint8_t)(pkt->Reason);
+    ptr[1] = (uint8_t)((pkt->Reason) >> 8); ptr += 2;
+    ptr[0] = (uint8_t)pkt->Type; ptr += 1;
+    return 9;
+}
+
+size_t control_deserialize(Control* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 9) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    pkt->Reason = (uint16_t)((uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8)); ptr += 2;
+    pkt->Type = (uint8_t)ptr[0]; ptr += 1;
+    return 9;
+}
+
+bool control_equals(const Control* a, const Control* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(Control)) == 0;
+}
+
+void directive_init(Directive* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(Directive));
+    pkt->Header.OpCode = PACKET_DIRECTIVE_OPCODE;
+}
+
+size_t directive_serialize(const Directive* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 21) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    ptr[0] = (uint8_t)pkt->Type; ptr += 1;
+    ptr[0] = (uint8_t)(pkt->Reason);
+    ptr[1] = (uint8_t)((pkt->Reason) >> 8); ptr += 2;
+    ptr[0] = (uint8_t)pkt->Action; ptr += 1;
+    ptr[0] = (uint8_t)pkt->Control; ptr += 1;
+    ptr[0] = (uint8_t)(pkt->Arg0);
+    ptr[1] = (uint8_t)((pkt->Arg0) >> 8);
+    ptr[2] = (uint8_t)((pkt->Arg0) >> 16);
+    ptr[3] = (uint8_t)((pkt->Arg0) >> 24); ptr += 4;
+    ptr[0] = (uint8_t)(pkt->Arg1);
+    ptr[1] = (uint8_t)((pkt->Arg1) >> 8);
+    ptr[2] = (uint8_t)((pkt->Arg1) >> 16);
+    ptr[3] = (uint8_t)((pkt->Arg1) >> 24); ptr += 4;
+    ptr[0] = (uint8_t)(pkt->Arg2);
+    ptr[1] = (uint8_t)((pkt->Arg2) >> 8); ptr += 2;
+    return 21;
+}
+
+size_t directive_deserialize(Directive* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 21) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    pkt->Type = (uint8_t)ptr[0]; ptr += 1;
+    pkt->Reason = (uint16_t)((uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8)); ptr += 2;
+    pkt->Action = (uint8_t)ptr[0]; ptr += 1;
+    pkt->Control = (uint8_t)ptr[0]; ptr += 1;
+    pkt->Arg0 = (uint32_t)((uint32_t)ptr[0] | ((uint32_t)ptr[1] << 8) | ((uint32_t)ptr[2] << 16) | ((uint32_t)ptr[3] << 24)); ptr += 4;
+    pkt->Arg1 = (uint32_t)((uint32_t)ptr[0] | ((uint32_t)ptr[1] << 8) | ((uint32_t)ptr[2] << 16) | ((uint32_t)ptr[3] << 24)); ptr += 4;
+    pkt->Arg2 = (uint16_t)((uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8)); ptr += 2;
+    return 21;
+}
+
+bool directive_equals(const Directive* a, const Directive* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(Directive)) == 0;
+}
+
+void proofofworkchallenge_init(ProofOfWorkChallenge* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(ProofOfWorkChallenge));
+    pkt->Header.OpCode = PACKET_PROOFOFWORKCHALLENGE_OPCODE;
+}
+
+size_t proofofworkchallenge_serialize(const ProofOfWorkChallenge* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 79) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(ptr, &pkt->Nonce, 32); ptr += 32;
+    ptr[0] = (uint8_t)pkt->Difficulty; ptr += 1;
+    ptr[0] = (uint8_t)(pkt->TimestampTicks);
+    ptr[1] = (uint8_t)((pkt->TimestampTicks) >> 8);
+    ptr[2] = (uint8_t)((pkt->TimestampTicks) >> 16);
+    ptr[3] = (uint8_t)((pkt->TimestampTicks) >> 24);
+    ptr[4] = (uint8_t)((pkt->TimestampTicks) >> 32);
+    ptr[5] = (uint8_t)((pkt->TimestampTicks) >> 40);
+    ptr[6] = (uint8_t)((pkt->TimestampTicks) >> 48);
+    ptr[7] = (uint8_t)((pkt->TimestampTicks) >> 56); ptr += 8;
+    memcpy(ptr, &pkt->Mac, 32); ptr += 32;
+    return 79;
+}
+
+size_t proofofworkchallenge_deserialize(ProofOfWorkChallenge* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 79) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(&pkt->Nonce, ptr, 32); ptr += 32;
+    pkt->Difficulty = (uint8_t)ptr[0]; ptr += 1;
+    pkt->TimestampTicks = (int64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
+    memcpy(&pkt->Mac, ptr, 32); ptr += 32;
+    return 79;
+}
+
+bool proofofworkchallenge_equals(const ProofOfWorkChallenge* a, const ProofOfWorkChallenge* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(ProofOfWorkChallenge)) == 0;
+}
+
+void proofofworkproof_init(ProofOfWorkProof* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(ProofOfWorkProof));
+    pkt->Header.OpCode = PACKET_PROOFOFWORKPROOF_OPCODE;
+}
+
+size_t proofofworkproof_serialize(const ProofOfWorkProof* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 87) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(ptr, &pkt->Nonce, 32); ptr += 32;
+    ptr[0] = (uint8_t)pkt->Difficulty; ptr += 1;
+    ptr[0] = (uint8_t)(pkt->TimestampTicks);
+    ptr[1] = (uint8_t)((pkt->TimestampTicks) >> 8);
+    ptr[2] = (uint8_t)((pkt->TimestampTicks) >> 16);
+    ptr[3] = (uint8_t)((pkt->TimestampTicks) >> 24);
+    ptr[4] = (uint8_t)((pkt->TimestampTicks) >> 32);
+    ptr[5] = (uint8_t)((pkt->TimestampTicks) >> 40);
+    ptr[6] = (uint8_t)((pkt->TimestampTicks) >> 48);
+    ptr[7] = (uint8_t)((pkt->TimestampTicks) >> 56); ptr += 8;
+    memcpy(ptr, &pkt->Mac, 32); ptr += 32;
+    ptr[0] = (uint8_t)(pkt->Solution);
+    ptr[1] = (uint8_t)((pkt->Solution) >> 8);
+    ptr[2] = (uint8_t)((pkt->Solution) >> 16);
+    ptr[3] = (uint8_t)((pkt->Solution) >> 24);
+    ptr[4] = (uint8_t)((pkt->Solution) >> 32);
+    ptr[5] = (uint8_t)((pkt->Solution) >> 40);
+    ptr[6] = (uint8_t)((pkt->Solution) >> 48);
+    ptr[7] = (uint8_t)((pkt->Solution) >> 56); ptr += 8;
+    return 87;
+}
+
+size_t proofofworkproof_deserialize(ProofOfWorkProof* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 87) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(&pkt->Nonce, ptr, 32); ptr += 32;
+    pkt->Difficulty = (uint8_t)ptr[0]; ptr += 1;
+    pkt->TimestampTicks = (int64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
+    memcpy(&pkt->Mac, ptr, 32); ptr += 32;
+    pkt->Solution = (int64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
+    return 87;
+}
+
+bool proofofworkproof_equals(const ProofOfWorkProof* a, const ProofOfWorkProof* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(ProofOfWorkProof)) == 0;
+}
+
+void sessionchallenge_init(SessionChallenge* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(SessionChallenge));
+    pkt->Header.OpCode = PACKET_SESSIONCHALLENGE_OPCODE;
+}
+
+size_t sessionchallenge_serialize(const SessionChallenge* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 102) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(ptr, &pkt->PublicKey, 32); ptr += 32;
+    memcpy(ptr, &pkt->Nonce, 32); ptr += 32;
+    memcpy(ptr, &pkt->Proof, 32); ptr += 32;
+    return 102;
+}
+
+size_t sessionchallenge_deserialize(SessionChallenge* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 102) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(&pkt->PublicKey, ptr, 32); ptr += 32;
+    memcpy(&pkt->Nonce, ptr, 32); ptr += 32;
+    memcpy(&pkt->Proof, ptr, 32); ptr += 32;
+    return 102;
+}
+
+bool sessionchallenge_equals(const SessionChallenge* a, const SessionChallenge* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(SessionChallenge)) == 0;
+}
+
+void sessionestablished_init(SessionEstablished* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(SessionEstablished));
+    pkt->Header.OpCode = PACKET_SESSIONESTABLISHED_OPCODE;
+}
+
+size_t sessionestablished_serialize(const SessionEstablished* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 46) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(ptr, &pkt->Proof, 32); ptr += 32;
+    ptr[0] = (uint8_t)(pkt->SessionToken);
+    ptr[1] = (uint8_t)((pkt->SessionToken) >> 8);
+    ptr[2] = (uint8_t)((pkt->SessionToken) >> 16);
+    ptr[3] = (uint8_t)((pkt->SessionToken) >> 24);
+    ptr[4] = (uint8_t)((pkt->SessionToken) >> 32);
+    ptr[5] = (uint8_t)((pkt->SessionToken) >> 40);
+    ptr[6] = (uint8_t)((pkt->SessionToken) >> 48);
+    ptr[7] = (uint8_t)((pkt->SessionToken) >> 56); ptr += 8;
+    return 46;
+}
+
+size_t sessionestablished_deserialize(SessionEstablished* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 46) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(&pkt->Proof, ptr, 32); ptr += 32;
+    pkt->SessionToken = (uint64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
+    return 46;
+}
+
+bool sessionestablished_equals(const SessionEstablished* a, const SessionEstablished* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(SessionEstablished)) == 0;
+}
+
+void sessioninit_init(SessionInit* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(SessionInit));
+    pkt->Header.OpCode = PACKET_SESSIONINIT_OPCODE;
+}
+
+size_t sessioninit_serialize(const SessionInit* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 70) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(ptr, &pkt->PublicKey, 32); ptr += 32;
+    memcpy(ptr, &pkt->Nonce, 32); ptr += 32;
+    return 70;
+}
+
+size_t sessioninit_deserialize(SessionInit* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 70) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(&pkt->PublicKey, ptr, 32); ptr += 32;
+    memcpy(&pkt->Nonce, ptr, 32); ptr += 32;
+    return 70;
+}
+
+bool sessioninit_equals(const SessionInit* a, const SessionInit* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(SessionInit)) == 0;
+}
+
+void sessionproof_init(SessionProof* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(SessionProof));
+    pkt->Header.OpCode = PACKET_SESSIONPROOF_OPCODE;
+}
+
+size_t sessionproof_serialize(const SessionProof* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 38) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(ptr, &pkt->Proof, 32); ptr += 32;
+    return 38;
+}
+
+size_t sessionproof_deserialize(SessionProof* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 38) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(&pkt->Proof, ptr, 32); ptr += 32;
+    return 38;
+}
+
+bool sessionproof_equals(const SessionProof* a, const SessionProof* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(SessionProof)) == 0;
+}
+
+void sessionresume_init(SessionResume* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(SessionResume));
+    pkt->Header.OpCode = PACKET_SESSIONRESUME_OPCODE;
+}
+
+size_t sessionresume_serialize(const SessionResume* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 49) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    ptr[0] = (uint8_t)pkt->Stage; ptr += 1;
+    ptr[0] = (uint8_t)(pkt->SessionToken);
+    ptr[1] = (uint8_t)((pkt->SessionToken) >> 8);
+    ptr[2] = (uint8_t)((pkt->SessionToken) >> 16);
+    ptr[3] = (uint8_t)((pkt->SessionToken) >> 24);
+    ptr[4] = (uint8_t)((pkt->SessionToken) >> 32);
+    ptr[5] = (uint8_t)((pkt->SessionToken) >> 40);
+    ptr[6] = (uint8_t)((pkt->SessionToken) >> 48);
+    ptr[7] = (uint8_t)((pkt->SessionToken) >> 56); ptr += 8;
+    ptr[0] = (uint8_t)(pkt->Reason);
+    ptr[1] = (uint8_t)((pkt->Reason) >> 8); ptr += 2;
+    memcpy(ptr, &pkt->Proof, 32); ptr += 32;
+    return 49;
+}
+
+size_t sessionresume_deserialize(SessionResume* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 49) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    pkt->Stage = (uint8_t)ptr[0]; ptr += 1;
+    pkt->SessionToken = (uint64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
+    pkt->Reason = (uint16_t)((uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8)); ptr += 2;
+    memcpy(&pkt->Proof, ptr, 32); ptr += 32;
+    return 49;
+}
+
+bool sessionresume_equals(const SessionResume* a, const SessionResume* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(SessionResume)) == 0;
+}
+
+void sessiontofu_init(SessionTofu* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(SessionTofu));
+    pkt->Header.OpCode = PACKET_SESSIONTOFU_OPCODE;
+}
+
+size_t sessiontofu_serialize(const SessionTofu* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 38) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(ptr, &pkt->PublicKey, 32); ptr += 32;
+    return 38;
+}
+
+size_t sessiontofu_deserialize(SessionTofu* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 38) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    memcpy(&pkt->PublicKey, ptr, 32); ptr += 32;
+    return 38;
+}
+
+bool sessiontofu_equals(const SessionTofu* a, const SessionTofu* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(SessionTofu)) == 0;
+}
+
+void timesync_init(TimeSync* pkt)
+{
+    if (!pkt) return;
+    memset(pkt, 0, sizeof(TimeSync));
+    pkt->Header.OpCode = PACKET_TIMESYNC_OPCODE;
+}
+
+size_t timesync_serialize(const TimeSync* pkt, uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 23) return 0;
+    uint8_t* ptr = buf;
+
+    memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    ptr[0] = (uint8_t)pkt->Type; ptr += 1;
+    ptr[0] = (uint8_t)(pkt->Timestamp);
+    ptr[1] = (uint8_t)((pkt->Timestamp) >> 8);
+    ptr[2] = (uint8_t)((pkt->Timestamp) >> 16);
+    ptr[3] = (uint8_t)((pkt->Timestamp) >> 24);
+    ptr[4] = (uint8_t)((pkt->Timestamp) >> 32);
+    ptr[5] = (uint8_t)((pkt->Timestamp) >> 40);
+    ptr[6] = (uint8_t)((pkt->Timestamp) >> 48);
+    ptr[7] = (uint8_t)((pkt->Timestamp) >> 56); ptr += 8;
+    ptr[0] = (uint8_t)(pkt->MonoTicks);
+    ptr[1] = (uint8_t)((pkt->MonoTicks) >> 8);
+    ptr[2] = (uint8_t)((pkt->MonoTicks) >> 16);
+    ptr[3] = (uint8_t)((pkt->MonoTicks) >> 24);
+    ptr[4] = (uint8_t)((pkt->MonoTicks) >> 32);
+    ptr[5] = (uint8_t)((pkt->MonoTicks) >> 40);
+    ptr[6] = (uint8_t)((pkt->MonoTicks) >> 48);
+    ptr[7] = (uint8_t)((pkt->MonoTicks) >> 56); ptr += 8;
+    return 23;
+}
+
+size_t timesync_deserialize(TimeSync* pkt, const uint8_t* buf, size_t buf_size)
+{
+    if (!pkt || !buf || buf_size < 23) return 0;
+    const uint8_t* ptr = buf;
+
+    memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
+    pkt->Type = (uint8_t)ptr[0]; ptr += 1;
+    pkt->Timestamp = (int64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
+    pkt->MonoTicks = (int64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
+    return 23;
+}
+
+bool timesync_equals(const TimeSync* a, const TimeSync* b)
+{
+    if (!a || !b) return false;
+    return memcmp(a, b, sizeof(TimeSync)) == 0;
 }
 

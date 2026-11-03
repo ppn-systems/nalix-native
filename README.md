@@ -1,80 +1,116 @@
-# ⚡ Nalix Protogen
+# Protogen
 
-[![GitHub repository](https://img.shields.io/badge/GitHub-ppn--systems%2Fprotogen-blue?logo=github)](https://github.com/ppn-systems/protogen)
-[![.NET 10.0](https://img.shields.io/badge/.NET-10.0-blueviolet?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com)
-[![License](https://img.shields.io/badge/License-Apache_2.0-orange?logo=apache)](LICENSE)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/ppn-systems/protogen)
+[![Target Runtime](https://img.shields.io/badge/.NET-10.0-blue)](https://dotnet.microsoft.com)
+[![License](https://img.shields.io/badge/license-Apache_2.0-blue)](LICENSE)
 
-A high-performance, Roslyn-powered code generation utility that compiles C# packet definitions into wire-compatible C and Rust bindings. Ensures identical byte layout, alignment, and serialization order across platforms.
-
----
-
-## 🗺️ Documentation Index
-
-To keep this project maintainable as we support additional target languages, detailed specifications are split into dedicated guides:
-* **📐 [Protogen Serialization & Type Specification](docs/SPECIFICATION.md):** Primitive and complex type mappings (C/Rust), string formats, C# definition attributes (`[Packet]`, `[SerializeOrder]`), and generated code outputs.
+Protogen is a cross-platform protocol code generator that converts C# binary packet contracts into native C (C99, ESP-IDF, FreeRTOS) and Rust data structures matching the Nalix v14 wire protocol.
 
 ---
 
-## ✨ Key Features
+## Documentation Index
 
-* **Roslyn-Powered Parser:** Uses `MSBuildWorkspace` to parse `.csproj` source trees or reflection to read compiled assemblies (`.dll`).
-* **Multi-Language Bindings:** Generates fully-typed native C structs (with MSVC pack pragmas) and safe Rust structs.
-* **Automatic Size Verification:** Builds round-trip test suites (`packet_test.c` and `packet_tests.rs`) to prove serialization/deserialization logic is identical across target languages.
+- [Architecture Specification](docs/ARCHITECTURE.md): Domain-Driven Design (DDD), SOLID architecture, Roslyn and Reflection analysis pipelines.
+- [Wire Protocol & Type Specification](docs/SPECIFICATION.md): Nalix v14 6-byte header, opcode discovery, primitive and complex type mappings.
+- [Integration Guide](docs/INTEGRATION.md): Integration patterns for ESP-IDF, Arduino, FreeRTOS, and Rust services.
 
 ---
 
-## 🛠️ Installation
+## System Overview
 
-Build the self-contained compiler binary from the repository root:
+Protogen operates as an unmanaged code generator targeting embedded and native environments:
 
-```bash
-dotnet publish src/Nalix.Protogen.Cli -c Release -o ./bin
+- **Wire Compatibility:** Emits binary layouts matching Nalix v14 (6-byte header consisting of OpCode, Flags, Priority, and SequenceId; Little-Endian byte order; length-prefixed strings).
+- **Alignment Safety:** Generates sequential bitshift decoding routines for non-aligned memory access environments (e.g., Xtensa, RISC-V, ARM Cortex-M).
+- **Multi-Compiler Packing:** Emits compilation guards for GCC/Clang (`__attribute__((packed))` and `#pragma pack(push, 1)`) and MSVC.
+- **Standalone Analysis:** Does not require runtime references or project dependencies to Nalix assemblies. Parses contracts via Roslyn compilation workspaces or reflection metadata.
+
+---
+
+## Project Structure
+
+The solution adheres to clean architecture boundaries:
+
+```plaintext
+src/
+├── Protogen.Core/        # Domain models, contracts, and protocol constants
+│   ├── Constants/        # ProtocolConstants, ContractMetadata
+│   ├── Models/           # PacketSchema, FieldSchema, GeneratedFile
+│   └── Contracts/        # IContractAnalyzer, ICodeGenerator, GenerationContext
+│
+├── Protogen.Engine/      # Analysis and generation implementations
+│   ├── Analysis/         # RoslynProjectAnalyzer, ReflectionAssemblyAnalyzer, TypeResolver
+│   └── Generators/       # CGenerator, RustGenerator
+│
+├── Protogen.Cli/         # Command-line interface
+│   └── Program.cs        # CLI entry point, argument parsing
+│
+tests/
+└── Protogen.Tests/       # Unit and regression test suite
 ```
 
-The output compiles to a self-contained `protogen` executable in the `./bin` directory.
+---
+
+## Compilation
+
+Prerequisites: .NET 10.0 SDK.
+
+```bash
+# Build the solution in Release configuration
+dotnet build src/Protogen.slnx -c Release
+
+# Run automated tests
+dotnet test src/Protogen.slnx -c Release
+
+# Publish standalone executable
+dotnet publish src/Protogen.Cli/Protogen.Cli.csproj -c Release -o bin/
+```
+
+The resulting CLI binary is emitted to `bin/protogen` (`bin/protogen.exe` on Windows).
 
 ---
 
-## 💻 CLI Usage
+## Command-Line Interface
+
+### Syntax
 
 ```bash
-# General CLI Command Syntax
 protogen --project <path-to-csproj> --c-out <dir> [--rust-out <dir>] [options]
 protogen --assembly <path-to-dll> --c-out <dir> [--rust-out <dir>] [options]
 ```
 
-### Options & Flags
+### Options
 
-| Flag | Long Flag | Description |
+| Option | Short | Description |
 | :--- | :--- | :--- |
-| `-p` | `--project` | Path to the C# `.csproj` containing packet definitions. |
-| `-a` | `--assembly` | Path to the compiled C# `.dll` containing packet definitions. |
-| | `--c-out` | Output directory for C files (`packets.h`, `packets.c`, `packet_test.c`). |
-| | `--rust-out` | Output directory for Rust files (`packets.rs`, `packets_tests.rs`). |
-| `-v` | `--verbose` | Enable verbose logging for MSBuild warnings. |
+| `--project` | `-p` | Path to the C# `.csproj` containing packet contract source files. |
+| `--assembly` | `-a` | Path to the compiled C# `.dll` containing packet contract metadata. |
+| `--c-out` | | Output directory for C headers and source (`packets.h`, `packets.c`, `packet_test.c`). |
+| `--rust-out` | | Output directory for Rust source files (`packets.rs`, `packets_tests.rs`). |
+| `--verbose` | `-v` | Enable verbose diagnostic logging and stack traces. |
+| `--help` | `-h` | Display command-line options and usage syntax. |
 
-### Practical Examples
+---
+
+## Verification
+
+### C Test Suite
 
 ```bash
-# Generate C and Rust bindings from a csproj source
-protogen -p ../Nalix.Codec/Nalix.Codec.csproj --c-out ./gen/c --rust-out ./gen/rs
+cd examples/c
+gcc -Wall -Wextra -Iinclude src/packets.c tests/packet_test.c -o packet_test
+./packet_test
+```
 
-# Generate C-only bindings from a compiled DLL assembly
-protogen -a ../Nalix.Codec/bin/Release/net10.0/Nalix.Codec.dll --c-out ./gen/c
+### Rust Test Suite
+
+```bash
+cd examples/rust
+cargo test
 ```
 
 ---
 
-## 📐 Project Architecture
+## License
 
-```plaintext
-Nalix.Protogen.Abstractions   # Shared models, interfaces, and options contracts.
-Nalix.Protogen.Roslyn         # MSBuild and Roslyn workspace packet code parser.
-Nalix.Protogen.Cli            # Console Application entry point (protogen).
-```
-
----
-
-## ⚖️ License
-
-Apache License 2.0. See [LICENSE](LICENSE) for details.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
