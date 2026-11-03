@@ -51,30 +51,21 @@ The console application interface. It handles argument parsing, configures the `
 ## 3. Key Design Decisions
 
 ### A. Implicit Header Insertion
-In the C# Nalix framework, all packet classes inherit from `PacketBase<TSelf>`, which itself inherits from `FrameBase`. `FrameBase` contains a standard `PacketHeader` (10 bytes). Consequently, C# packets have a header prepended on the wire automatically, without developers declaring it in each subclass.
+In the C# Nalix framework, all packet classes inherit from `PacketBase<TSelf>`, which itself inherits from `FrameBase`. `FrameBase` contains a standard `PacketHeader` (6 bytes: `OpCode: 2B`, `Flags: 1B`, `Priority: 1B`, `SequenceId: 2B`). Consequently, C# packets have a header prepended on the wire automatically, without developers declaring it in each subclass.
 
 Because C and Rust do not support class inheritance, they use flat structs. To guarantee wire layout alignment:
 * `PacketAnalyzer` checks if a C# symbol inherits `PacketBase<TSelf>` (`InheritsPacketBaseOfSelf`).
 * If true, it automatically inserts an implicit `Header` field of type `PacketHeader` at index `0` of the field list.
 * This ensures C and Rust structs match C# byte alignment exactly.
 
-### B. Deterministic FNV-1a Magic Number Hashing
-To avoid requiring developers to manually assign a unique magic number to each packet class via attributes, C# Nalix derives the magic number automatically by hashing the **full type name** (including namespace) using the FNV-1a 32-bit hash algorithm:
+### B. StaticOpCode Packet Identification
+In Nalix v14, packets are identified by a 16-bit unsigned integer `OpCode` exposed via `IPacketStaticOpcode.StaticOpCode` on each packet type.
 
-```csharp
-private static uint ComputeMagic(string fullName)
-{
-    uint hash = 2166136261u;
-    foreach (char c in fullName)
-    {
-        hash ^= c;
-        hash *= 16777619u;
-    }
-    return hash;
-}
-```
+`PacketAnalyzer` extracts the `StaticOpCode` constant expression directly from the class AST (or via reflection when parsing `.dll` assemblies) and generates:
+* C: `#define PACKET_<NAME>_OPCODE 0xXXXXU`
+* Rust: `pub const OPCODE: u16 = 0xXXXX;`
 
-`PacketAnalyzer` implements this exact hash function, meaning the generated C/Rust files automatically match C#'s runtime packet identification hash.
+An automatic init helper (`<packet>_init(&pkt)`) is emitted in C to initialize the struct and assign its header opcode automatically.
 
 ### C. Variable-Length Array & String Encoding
 C# types like `string` and `ReadOnlyMemory<byte>` represent dynamic data and are mapped on the wire as length-prefixed formats:

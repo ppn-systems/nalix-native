@@ -1,33 +1,18 @@
 // Copyright (c) 2026 PPN Corporation. All rights reserved.
 // Licensed under the Apache License, Version 2.0.
 
-using Nalix.Abstractions.Primitives;
-using Nalix.Abstractions.Serialization;
-
 namespace Nalix.Protogen.Roslyn;
 
 /// <summary>
-/// Centralized type-safe metadata cho analyzer.
-/// Sử dụng typeof() để compiler check ngay, không còn magic string.
+/// Centralized type-safe metadata for analyzer.
+/// Decoupled from runtime assemblies so the analyzer can parse any Nalix version.
 /// </summary>
 internal static class KnownTypes
 {
-    /// <summary>
-    /// Interface IFixedSizeSerializable nằm trong Nalix.Abstractions
-    /// </summary>
-    public static readonly string IFixedSizeSerializable =
-        typeof(IFixedSizeSerializable).FullName!;
-
-    /// <summary>
-    /// Namespace của PacketBase<T> (nằm trong Nalix.Codec.DataFrames)
-    /// </summary>
+    public const string IFixedSizeSerializable = "Nalix.Abstractions.Serialization.IFixedSizeSerializable";
     public const string PacketBaseNamespace = "Nalix.Codec.DataFrames";
-
-    /// <summary>
-    /// Tên class PacketBase (dùng để check generic inheritance)
-    /// </summary>
     public const string PacketBaseName = "PacketBase";
-
-    // Low-level explicit structs
-    public static readonly string PacketHeader = typeof(PacketHeader).FullName!;
+    public const string PacketHeader = "Nalix.Abstractions.Primitives.PacketHeader";
+    public const string Bytes32 = "Nalix.Abstractions.Primitives.Bytes32";
+    public const string IPacketStaticOpcode = "Nalix.Abstractions.Networking.Packets.IPacketStaticOpcode";
 }

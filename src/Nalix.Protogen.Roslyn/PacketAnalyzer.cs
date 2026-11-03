@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0.
 
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.MSBuild;
@@ -11,8 +12,8 @@ namespace Nalix.Protogen.Roslyn;
 
 /// <summary>
 /// Production-grade Roslyn analyzer.
-/// Sử dụng KnownAttributes + typeof để loại bỏ hoàn toàn magic string.
-/// Hỗ trợ đầy đủ Bytes32, PacketHeader, PacketBase<T>, SerializeOrder, SerializeHeader...
+/// Decoupled from runtime assemblies so it can parse any Nalix contract version.
+/// Supports Bytes32, Nalix v14 6-byte PacketHeader, StaticOpCode, PacketBase&lt;T&gt;, SerializeOrder, SerializeHeader...
 /// </summary>
 public sealed class PacketAnalyzer
 {
@@ -30,9 +31,9 @@ public sealed class PacketAnalyzer
         List<PacketDefinition> packets = new();
         HashSet<string> seen = new(StringComparer.Ordinal);
 
-        // PacketHeader is always present — hardcoded from explicit layout
+        // PacketHeader is always present — hardcoded from Nalix v14 explicit layout (6 bytes)
         packets.Add(CreatePacketHeaderDefinition());
-        seen.Add("Nalix.Abstractions.Primitives.PacketHeader");
+        seen.Add(KnownTypes.PacketHeader);
 
         foreach (SyntaxTree syntaxTree in compilation.SyntaxTrees)
         {
@@ -68,29 +69,27 @@ public sealed class PacketAnalyzer
 
     private static PacketDefinition CreatePacketHeaderDefinition()
     {
-        // PacketHeader uses [StructLayout(Explicit)] with fixed offsets:
-        //   MagicNumber: uint   @ offset 0  (4 bytes)
-        //   OpCode:      ushort @ offset 4  (2 bytes)
-        //   Flags:       byte   @ offset 6  (1 byte)
-        //   Priority:    byte   @ offset 7  (1 byte)
-        //   SequenceId:  ushort @ offset 8  (2 bytes)
-        //   Total: 10 bytes
+        // Nalix v14 standard PacketHeader (6 bytes):
+        //   OpCode:      ushort @ offset 0  (2 bytes)
+        //   Flags:       byte   @ offset 2  (1 byte)
+        //   Priority:    byte   @ offset 3  (1 byte)
+        //   SequenceId:  ushort @ offset 4  (2 bytes)
+        //   Total: 6 bytes
         List<PacketField> fields =
         [
-            new PacketField("MagicNumber", "uint", "uint32_t", 0, true, 4, true, null),
-            new PacketField("OpCode", "ushort", "uint16_t", 4, true, 2, true, null),
-            new PacketField("Flags", "byte", "uint8_t", 6, true, 1, true, null),
-            new PacketField("Priority", "byte", "uint8_t", 7, true, 1, true, null),
-            new PacketField("SequenceId", "ushort", "uint16_t", 8, true, 2, true, null),
+            new PacketField("OpCode", "ushort", "uint16_t", 0, true, 2, true, false, null),
+            new PacketField("Flags", "byte", "uint8_t", 2, true, 1, true, false, null),
+            new PacketField("Priority", "byte", "uint8_t", 3, true, 1, true, false, null),
+            new PacketField("SequenceId", "ushort", "uint16_t", 4, true, 2, true, false, null),
         ];
 
         return new PacketDefinition(
             Name: "PacketHeader",
-            FullName: "Nalix.Abstractions.Primitives.PacketHeader",
-            Magic: 0,
+            FullName: KnownTypes.PacketHeader,
+            OpCode: 0,
             Fields: fields,
             IsFixedSize: true,
-            FixedSize: 10
+            FixedSize: 6
         );
     }
 
@@ -124,52 +123,137 @@ public sealed class PacketAnalyzer
 
     private static PacketDefinition? BuildPacketDefinitionFromType(Type type)
     {
-        List<PacketField> fields = new();
+        List<MemberInfo> allMembers = new();
+        Type? currentType = type;
 
-        // Lấy tất cả public properties và fields
-        foreach (PropertyInfo prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        while (currentType != null && currentType != typeof(object))
         {
-            fields.Add(new PacketField(
-                Name: prop.Name,
-                CSharpType: prop.PropertyType.FullName ?? prop.PropertyType.Name,
-                CType: ToCTypeFromReflection(prop.PropertyType),
-                Order: 0,
-                IsHeader: false,
-                Size: GetTypeSizeFromReflection(prop.PropertyType),
-                IsUnmanaged: prop.PropertyType.IsValueType,
-                Comment: null
-            ));
+            MemberInfo[] members = currentType.GetMembers(
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+
+            foreach (MemberInfo member in members)
+            {
+                if (member is not (FieldInfo or PropertyInfo))
+                {
+                    continue;
+                }
+
+                bool hasOrder = HasCustomAttribute(member, "SerializeOrder");
+                bool hasHeader = HasCustomAttribute(member, "SerializeHeader");
+                bool hasIgnore = HasCustomAttribute(member, "SerializeIgnore");
+
+                if (hasIgnore)
+                {
+                    continue;
+                }
+
+                if (hasOrder || hasHeader)
+                {
+                    allMembers.Add(member);
+                }
+            }
+
+            currentType = currentType.BaseType;
         }
 
-        foreach (FieldInfo field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
+        IOrderedEnumerable<MemberInfo> headers = allMembers
+            .Where(m => HasCustomAttribute(m, "SerializeHeader"))
+            .OrderBy(m => GetAttributeOrder(m, "SerializeHeader"));
+
+        IOrderedEnumerable<MemberInfo> payload = allMembers
+            .Where(m => HasCustomAttribute(m, "SerializeOrder"))
+            .OrderBy(m => GetAttributeOrder(m, "SerializeOrder"));
+
+        List<PacketField> fields = new();
+
+        foreach (MemberInfo member in headers.Concat(payload))
         {
+            Type memberType = member switch
+            {
+                FieldInfo f => f.FieldType,
+                PropertyInfo p => p.PropertyType,
+                _ => typeof(object)
+            };
+
+            bool isNullable = memberType.IsGenericType && memberType.GetGenericTypeDefinition() == typeof(Nullable<>);
+            Type effectiveType = isNullable ? Nullable.GetUnderlyingType(memberType)! : memberType;
+
+            bool isHeader = HasCustomAttribute(member, "SerializeHeader");
+            int order = isHeader ? GetAttributeOrder(member, "SerializeHeader") : GetAttributeOrder(member, "SerializeOrder");
+
+            string fieldName = member.Name.TrimStart('_');
+            if (fieldName.Length > 0 && char.IsLower(fieldName[0]))
+            {
+                fieldName = char.ToUpperInvariant(fieldName[0]) + fieldName.Substring(1);
+            }
+
             fields.Add(new PacketField(
-                Name: field.Name,
-                CSharpType: field.FieldType.FullName ?? field.FieldType.Name,
-                CType: ToCTypeFromReflection(field.FieldType),
-                Order: 0,
-                IsHeader: false,
-                Size: GetTypeSizeFromReflection(field.FieldType),
-                IsUnmanaged: field.FieldType.IsValueType,
+                Name: fieldName,
+                CSharpType: effectiveType.FullName ?? effectiveType.Name,
+                CType: ToCTypeFromReflection(effectiveType),
+                Order: order,
+                IsHeader: isHeader,
+                Size: GetTypeSizeFromReflection(effectiveType),
+                IsUnmanaged: effectiveType.IsValueType,
+                IsNullable: isNullable,
                 Comment: null
             ));
         }
 
         if (HasPacketAttribute(type) && !fields.Any(f => f.CType == "PacketHeader" || f.CSharpType.Contains("PacketHeader", StringComparison.Ordinal)))
         {
-            fields.Insert(0, new PacketField("Header", "Nalix.Abstractions.Primitives.PacketHeader", "PacketHeader", -1, true, 10, true, "Implicit Packet Header"));
+            fields.Insert(0, new PacketField("Header", KnownTypes.PacketHeader, "PacketHeader", -1, true, 6, true, false, "Implicit Packet Header"));
         }
 
-        uint magic = ComputeMagic(type.FullName ?? type.Name);
+        ushort opCode = TryGetStaticOpCodeFromType(type);
 
         return new PacketDefinition(
             Name: type.Name,
             FullName: type.FullName ?? type.Name,
-            Magic: magic,
+            OpCode: opCode,
             Fields: fields,
             IsFixedSize: !fields.Any(f => f.Size == 0 || f.CType == "NalixString"),
             FixedSize: 0
         );
+    }
+
+    private static bool HasCustomAttribute(MemberInfo member, string attributeName)
+    {
+        return member.GetCustomAttributes().Any(a =>
+            a.GetType().Name == attributeName ||
+            a.GetType().FullName == attributeName ||
+            a.GetType().Name == attributeName + "Attribute");
+    }
+
+    private static int GetAttributeOrder(MemberInfo member, string attributeName)
+    {
+        CustomAttributeData? attr = member.CustomAttributes.FirstOrDefault(a =>
+            a.AttributeType.Name == attributeName ||
+            a.AttributeType.FullName == attributeName ||
+            a.AttributeType.Name == attributeName + "Attribute");
+
+        if (attr != null && attr.ConstructorArguments.Count > 0 && attr.ConstructorArguments[0].Value is int order)
+        {
+            return order;
+        }
+
+        return 0;
+    }
+
+    private static ushort TryGetStaticOpCodeFromType(Type type)
+    {
+        PropertyInfo? prop = type.GetProperty("StaticOpCode", BindingFlags.Public | BindingFlags.Static);
+        if (prop is null) return 0;
+        object? val = prop.GetValue(null);
+        return val switch
+        {
+            ushort u => u,
+            int i and >= 0 and <= ushort.MaxValue => (ushort)i,
+            short s and >= 0 => (ushort)s,
+            byte b => b,
+            uint ui and <= ushort.MaxValue => (ushort)ui,
+            _ => 0
+        };
     }
 
     private static bool HasPacketAttribute(Type type)
@@ -212,20 +296,75 @@ public sealed class PacketAnalyzer
 
         if (InheritsPacketBaseOfSelf(symbol) && !fields.Any(f => f.CType == "PacketHeader" || f.CSharpType.Contains("PacketHeader", StringComparison.Ordinal)))
         {
-            fields.Insert(0, new PacketField("Header", "Nalix.Abstractions.Primitives.PacketHeader", "PacketHeader", -1, true, 10, true, "Implicit Packet Header"));
+            fields.Insert(0, new PacketField("Header", KnownTypes.PacketHeader, "PacketHeader", -1, true, 6, true, false, "Implicit Packet Header"));
         }
 
-        uint magic = ComputeMagic(symbol.ToDisplayString());
+        ushort opCode = TryGetStaticOpCode(symbol, semanticModel);
 
         return new PacketDefinition(
             Name: symbol.Name,
             FullName: symbol.ToDisplayString(),
-            Magic: magic,
+            OpCode: opCode,
             Fields: fields,
             IsFixedSize: symbol.AllInterfaces.Any(i =>
                 i.ToDisplayString() == KnownTypes.IFixedSizeSerializable),
             FixedSize: 0
         );
+    }
+
+    private static ushort TryGetStaticOpCode(INamedTypeSymbol symbol, SemanticModel semanticModel)
+    {
+        IPropertySymbol? prop = symbol.GetMembers("StaticOpCode")
+            .OfType<IPropertySymbol>()
+            .FirstOrDefault(static p => p.IsStatic);
+
+        if (prop is null)
+        {
+            return 0;
+        }
+
+        foreach (SyntaxReference syntaxRef in prop.DeclaringSyntaxReferences)
+        {
+            if (syntaxRef.GetSyntax() is not PropertyDeclarationSyntax propSyntax)
+            {
+                continue;
+            }
+
+            ExpressionSyntax? expr = propSyntax.ExpressionBody?.Expression ?? propSyntax.Initializer?.Value;
+            if (expr is null && propSyntax.AccessorList is not null)
+            {
+                AccessorDeclarationSyntax? getter = propSyntax.AccessorList.Accessors
+                    .FirstOrDefault(static a => a.Keyword.ValueText == "get");
+                expr = getter?.ExpressionBody?.Expression
+                    ?? getter?.Body?.Statements.OfType<ReturnStatementSyntax>().FirstOrDefault()?.Expression;
+            }
+
+            if (expr is null)
+            {
+                continue;
+            }
+
+            SemanticModel model = ReferenceEquals(semanticModel.SyntaxTree, expr.SyntaxTree)
+                ? semanticModel
+                : semanticModel.Compilation.GetSemanticModel(expr.SyntaxTree);
+
+            Optional<object?> constant = model.GetConstantValue(expr);
+            if (!constant.HasValue || constant.Value is null)
+            {
+                continue;
+            }
+
+            switch (constant.Value)
+            {
+                case ushort u: return u;
+                case int i and >= 0 and <= ushort.MaxValue: return (ushort)i;
+                case short s and >= 0: return (ushort)s;
+                case byte b: return b;
+                case uint ui and <= ushort.MaxValue: return (ushort)ui;
+            }
+        }
+
+        return 0;
     }
 
     private static List<ISymbol> GetOrderedMembers(INamedTypeSymbol symbol)
@@ -289,35 +428,48 @@ public sealed class PacketAnalyzer
             _ => null
         };
 
-        return typeSymbol == null
-            ? null
-            : new PacketField(
-            Name: member.Name,
-            CSharpType: typeSymbol.ToDisplayString(),
-            CType: ToCType(typeSymbol),
-            Order: 0,
-            IsHeader: HasAttribute(member, KnownAttributes.SerializeHeader),
-            Size: GetTypeSize(typeSymbol),
-            IsUnmanaged: typeSymbol.IsUnmanagedType,
+        if (typeSymbol == null)
+        {
+            return null;
+        }
+
+        bool isNullable = typeSymbol.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+        ITypeSymbol effectiveType = isNullable && typeSymbol is INamedTypeSymbol named && named.TypeArguments.Length > 0
+            ? named.TypeArguments[0]
+            : typeSymbol;
+
+        string cType = ToCType(effectiveType);
+        int size = GetTypeSize(effectiveType);
+        bool isUnmanaged = effectiveType.IsUnmanagedType;
+        bool isHeader = HasAttribute(member, KnownAttributes.SerializeHeader);
+        int order = isHeader ? GetOrder(member, KnownAttributes.SerializeHeader) : GetOrder(member, KnownAttributes.SerializeOrder);
+
+        string fieldName = member.Name.TrimStart('_');
+        if (fieldName.Length > 0 && char.IsLower(fieldName[0]))
+        {
+            fieldName = char.ToUpperInvariant(fieldName[0]) + fieldName.Substring(1);
+        }
+
+        return new PacketField(
+            Name: fieldName,
+            CSharpType: effectiveType.ToDisplayString(),
+            CType: cType,
+            Order: order,
+            IsHeader: isHeader,
+            Size: size,
+            IsUnmanaged: isUnmanaged,
+            IsNullable: isNullable,
             Comment: null
         );
     }
 
     private static string ToCType(ITypeSymbol type)
     {
-        // Bytes32
-        if (type.ToDisplayString() == "Nalix.Abstractions.Primitives.Bytes32")
+        if (type.ToDisplayString() == KnownTypes.Bytes32)
         {
             return "Bytes32";
         }
 
-        // ReadOnlyMemory<byte> / ReadOnlyMemory
-        if (type.ToDisplayString().Contains("ReadOnlyMemory", StringComparison.Ordinal))
-        {
-            return "NalixString";
-        }
-
-        // Enum - Lấy underlying type chính xác
         if (type.TypeKind == TypeKind.Enum && type is INamedTypeSymbol namedEnum)
         {
             SpecialType underlying = namedEnum.EnumUnderlyingType?.SpecialType ?? SpecialType.System_Int32;
@@ -335,35 +487,33 @@ public sealed class PacketAnalyzer
             };
         }
 
-        // Primitive types
-        return type.ToDisplayString() switch
+        if (type.SpecialType == SpecialType.System_String)
         {
-            "byte" or "System.Byte" => "uint8_t",
-            "sbyte" or "System.SByte" => "int8_t",
-            "short" or "System.Int16" => "int16_t",
-            "ushort" or "System.UInt16" => "uint16_t",
-            "int" or "System.Int32" => "int32_t",
-            "uint" or "System.UInt32" => "uint32_t",
-            "long" or "System.Int64" => "int64_t",
-            "ulong" or "System.UInt64" => "uint64_t",
-            "float" or "System.Single" => "float",
-            "double" or "System.Double" => "double",
-            "bool" or "System.Boolean" => "uint8_t",
-            "string" or "System.String" => "NalixString",
-            _ => $"/* unknown: {type.Name} */ uint8_t"
+            return "NalixString";
+        }
+
+        return type.SpecialType switch
+        {
+            SpecialType.System_Byte => "uint8_t",
+            SpecialType.System_SByte => "int8_t",
+            SpecialType.System_Boolean => "uint8_t",
+            SpecialType.System_Int16 => "int16_t",
+            SpecialType.System_UInt16 => "uint16_t",
+            SpecialType.System_Int32 => "int32_t",
+            SpecialType.System_UInt32 => "uint32_t",
+            SpecialType.System_Int64 => "int64_t",
+            SpecialType.System_UInt64 => "uint64_t",
+            SpecialType.System_Single => "float",
+            SpecialType.System_Double => "double",
+            _ => type.Name.Contains("PacketHeader", StringComparison.Ordinal) ? "PacketHeader" : "uint8_t"
         };
     }
 
     private static int GetTypeSize(ITypeSymbol type)
     {
-        if (type.ToDisplayString() == "Nalix.Abstractions.Primitives.Bytes32")
+        if (type.ToDisplayString() == KnownTypes.Bytes32)
         {
             return 32;
-        }
-
-        if (type.ToDisplayString().Contains("ReadOnlyMemory", StringComparison.Ordinal))
-        {
-            return 0; // variable-size
         }
 
         if (type.SpecialType == SpecialType.System_String)
@@ -400,7 +550,7 @@ public sealed class PacketAnalyzer
 
     private static string ToCTypeFromReflection(Type t)
     {
-        if (t.FullName == "Nalix.Abstractions.Primitives.Bytes32")
+        if (t.FullName == KnownTypes.Bytes32)
         {
             return "Bytes32";
         }
@@ -435,19 +585,19 @@ public sealed class PacketAnalyzer
             "Single" => "float",
             "Double" => "double",
             "Boolean" => "uint8_t",
-            "String" => "char*",           // sẽ xử lý riêng ở serialize
+            "String" => "NalixString",
             _ => t.Name.StartsWith("ReadOnlyMemory", StringComparison.Ordinal) ? "NalixString" : "uint8_t"
         };
     }
 
     private static int GetTypeSizeFromReflection(Type t)
     {
-        if (t.FullName == "Nalix.Abstractions.Primitives.Bytes32") return 32;
+        if (t.FullName == KnownTypes.Bytes32) return 32;
         if (t.Name.StartsWith("ReadOnlyMemory", StringComparison.Ordinal)) return 0;
-        if (t.IsEnum) return 4;
+        if (t.IsEnum) return Marshal.SizeOf(Enum.GetUnderlyingType(t));
         try
         {
-            return System.Runtime.InteropServices.Marshal.SizeOf(t);
+            return Marshal.SizeOf(t);
         }
 #pragma warning disable CA1031
         catch
@@ -455,17 +605,6 @@ public sealed class PacketAnalyzer
         {
             return 1;
         }
-    }
-
-    private static uint ComputeMagic(string fullName)
-    {
-        uint hash = 2166136261u;
-        foreach (char c in fullName)
-        {
-            hash ^= c;
-            hash *= 16777619u;
-        }
-        return hash;
     }
 
     private static bool IsPacket(INamedTypeSymbol symbol)

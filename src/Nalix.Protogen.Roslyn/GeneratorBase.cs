@@ -80,10 +80,10 @@ public abstract class GeneratorBase : IPacketCodeGenerator
 
         if (field.CSharpType.Contains("PacketHeader", StringComparison.Ordinal))
         {
-            return 10;
+            return 6;
         }
 
-        if (string.Equals(field.CSharpType, "Nalix.Abstractions.Primitives.Bytes32", StringComparison.Ordinal))
+        if (string.Equals(field.CSharpType, KnownTypes.Bytes32, StringComparison.Ordinal))
         {
             return 32;
         }
@@ -114,7 +114,7 @@ public abstract class GeneratorBase : IPacketCodeGenerator
             return "PacketHeader";
         }
 
-        if (string.Equals(cs, "Nalix.Abstractions.Primitives.Bytes32", StringComparison.Ordinal))
+        if (string.Equals(cs, KnownTypes.Bytes32, StringComparison.Ordinal))
         {
             return "[u8; 32]";
         }

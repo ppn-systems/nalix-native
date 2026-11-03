@@ -8,8 +8,8 @@ namespace Nalix.Protogen.Roslyn.C;
 
 /// <summary>
 /// Generates native C header and source files for Nalix protocol frames.
-/// Clean naming: struct = Handshake, function = handshake_serialize.
-/// No nalix_ prefix, no _t suffix.
+/// Compatible with Nalix v14 6-byte header and little-endian wire format.
+/// Cross-platform packing support for MSVC, GCC (ESP-IDF), and Clang.
 /// </summary>
 public sealed class CHeaderGenerator : GeneratorBase
 {
@@ -53,13 +53,14 @@ public sealed class CHeaderGenerator : GeneratorBase
         _ = sb.AppendLine("typedef struct { int32_t length; uint8_t* data; } NalixString;");
         _ = sb.AppendLine("void nalix_string_free(NalixString* s);");
         _ = sb.AppendLine();
-        _ = sb.AppendLine("#define PACKET_HEADER_SIZE 10");
+        _ = sb.AppendLine("// Nalix v14 standard 6-byte packet header");
+        _ = sb.AppendLine("#define PACKET_HEADER_SIZE 6");
         _ = sb.AppendLine();
 
         PacketDefinition? headerPacket = allPackets.FirstOrDefault(p => p.Name == "PacketHeader");
         if (headerPacket != null)
         {
-            _ = sb.AppendLine("#if defined(_MSC_VER)");
+            _ = sb.AppendLine("#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)");
             _ = sb.AppendLine("    #pragma pack(push, 1)");
             _ = sb.AppendLine("#endif");
             _ = sb.AppendLine();
@@ -70,7 +71,7 @@ public sealed class CHeaderGenerator : GeneratorBase
             }
             _ = sb.AppendLine("} PacketHeader;");
             _ = sb.AppendLine();
-            _ = sb.AppendLine("#if defined(_MSC_VER)");
+            _ = sb.AppendLine("#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)");
             _ = sb.AppendLine("    #pragma pack(pop)");
             _ = sb.AppendLine("#endif");
             _ = sb.AppendLine();
@@ -80,11 +81,11 @@ public sealed class CHeaderGenerator : GeneratorBase
         {
             int wireSize = CalculateWireSize(p);
 
-            AppendInvariant(sb, $"// {p.Name} — {wireSize} bytes, magic 0x{p.Magic:X8}");
-            AppendInvariant(sb, $"#define PACKET_{p.Name.ToUpperInvariant()} 0x{p.Magic:X8}U");
+            AppendInvariant(sb, $"// {p.Name} — {wireSize} bytes, opcode 0x{p.OpCode:X4}");
+            AppendInvariant(sb, $"#define PACKET_{p.Name.ToUpperInvariant()}_OPCODE 0x{p.OpCode:X4}U");
             AppendInvariant(sb, $"#define {p.Name.ToUpperInvariant()}_SIZE {wireSize}");
             _ = sb.AppendLine();
-            _ = sb.AppendLine("#if defined(_MSC_VER)");
+            _ = sb.AppendLine("#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)");
             _ = sb.AppendLine("    #pragma pack(push, 1)");
             _ = sb.AppendLine("#endif");
             _ = sb.AppendLine();
@@ -92,19 +93,28 @@ public sealed class CHeaderGenerator : GeneratorBase
             foreach (PacketField f in p.Fields)
             {
                 string cType = f.CSharpType.Contains("PacketHeader", StringComparison.Ordinal) ? "PacketHeader" : f.CType;
+                if (f.IsNullable)
+                {
+                    AppendInvariant(sb, $"    bool has_{f.Name};");
+                }
                 AppendInvariant(sb, $"    {cType} {f.Name};");
             }
             AppendInvariant(sb, $"}} {p.Name};");
             _ = sb.AppendLine();
-            _ = sb.AppendLine("#if defined(_MSC_VER)");
+            _ = sb.AppendLine("#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)");
             _ = sb.AppendLine("    #pragma pack(pop)");
             _ = sb.AppendLine("#endif");
             _ = sb.AppendLine();
 
             string lower = p.Name.ToLowerInvariant();
+            AppendInvariant(sb, $"void {lower}_init({p.Name}* pkt);");
             AppendInvariant(sb, $"size_t {lower}_serialize(const {p.Name}* pkt, uint8_t* buf, size_t buf_size);");
             AppendInvariant(sb, $"size_t {lower}_deserialize({p.Name}* pkt, const uint8_t* buf, size_t buf_size);");
             AppendInvariant(sb, $"bool {lower}_equals(const {p.Name}* a, const {p.Name}* b);");
+            if (p.Fields.Any(f => f.CType == "NalixString"))
+            {
+                AppendInvariant(sb, $"void {lower}_free({p.Name}* pkt);");
+            }
             _ = sb.AppendLine();
         }
 
@@ -130,8 +140,17 @@ public sealed class CHeaderGenerator : GeneratorBase
         {
             string name = p.Name;
             string lower = name.ToLowerInvariant();
-            bool hasString = p.Fields.Any(f => f.CType == "NalixString");
+            bool hasString = p.Fields.Any(f => f.CType == "NalixString" || f.IsNullable);
             int fixedSize = CalculateFixedSize(p);
+
+            // Init function
+            AppendInvariant(sb, $"void {lower}_init({name}* pkt)");
+            _ = sb.AppendLine("{");
+            _ = sb.AppendLine("    if (!pkt) return;");
+            AppendInvariant(sb, $"    memset(pkt, 0, sizeof({name}));");
+            AppendInvariant(sb, $"    pkt->Header.OpCode = PACKET_{p.Name.ToUpperInvariant()}_OPCODE;");
+            _ = sb.AppendLine("}");
+            _ = sb.AppendLine();
 
             if (hasString)
             {
@@ -176,18 +195,21 @@ public sealed class CHeaderGenerator : GeneratorBase
                 _ = sb.AppendLine();
 
                 // Free function for string packets
-                AppendInvariant(sb, $"void {lower}_free({name}* pkt)");
-                _ = sb.AppendLine("{");
-                _ = sb.AppendLine("    if (!pkt) return;");
-                foreach (PacketField field in p.Fields)
+                if (p.Fields.Any(f => f.CType == "NalixString"))
                 {
-                    if (field.CType == "NalixString")
+                    AppendInvariant(sb, $"void {lower}_free({name}* pkt)");
+                    _ = sb.AppendLine("{");
+                    _ = sb.AppendLine("    if (!pkt) return;");
+                    foreach (PacketField field in p.Fields)
                     {
-                        AppendInvariant(sb, $"    nalix_string_free(&pkt->{field.Name});");
+                        if (field.CType == "NalixString")
+                        {
+                            AppendInvariant(sb, $"    nalix_string_free(&pkt->{field.Name});");
+                        }
                     }
+                    _ = sb.AppendLine("}");
+                    _ = sb.AppendLine();
                 }
-                _ = sb.AppendLine("}");
-                _ = sb.AppendLine();
             }
             else
             {
@@ -238,50 +260,68 @@ public sealed class CHeaderGenerator : GeneratorBase
         string name = field.Name;
         int size = GetFieldSize(field);
 
+        if (field.IsNullable)
+        {
+            AppendInvariant(sb, $"    if (pkt->has_{name}) {{");
+            _ = sb.AppendLine("        ptr[0] = 1; ptr += 1;");
+            if (field.CType != "NalixString")
+            {
+                AppendInvariant(sb, $"        if ((size_t)(ptr - buf) + {size} > buf_size) return 0;");
+            }
+        }
+
+        string indent = field.IsNullable ? "    " : "";
+
         if (cs.Contains("PacketHeader", StringComparison.Ordinal))
         {
-            AppendInvariant(sb, $"    memcpy(ptr, &pkt->{name}, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;");
+            AppendInvariant(sb, $"    {indent}memcpy(ptr, &pkt->{name}, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;");
         }
-        else if (cs == "Nalix.Abstractions.Primitives.Bytes32")
+        else if (cs == KnownTypes.Bytes32)
         {
-            AppendInvariant(sb, $"    memcpy(ptr, pkt->{name}.data, 32); ptr += 32;");
+            AppendInvariant(sb, $"    {indent}memcpy(ptr, pkt->{name}.data, 32); ptr += 32;");
         }
         else if (field.CType == "NalixString")
         {
-            // Length-prefixed UTF-8: [int32_t length][bytes]
-            _ = sb.AppendLine("    {");
-            AppendInvariant(sb, $"        int32_t slen = pkt->{name}.length;");
-            AppendInvariant(sb, $"        if ((size_t)(ptr - buf) + 4 + (slen > 0 ? slen : 0) > buf_size) return 0;");
-            _ = sb.AppendLine("        memcpy(ptr, &slen, 4); ptr += 4;");
-            AppendInvariant(sb, $"        if (slen > 0 && pkt->{name}.data) {{ memcpy(ptr, pkt->{name}.data, slen); ptr += slen; }}");
-            _ = sb.AppendLine("    }");
+            AppendInvariant(sb, $"    {indent}{{");
+            AppendInvariant(sb, $"    {indent}    int32_t slen = pkt->{name}.length;");
+            AppendInvariant(sb, $"    {indent}    if ((size_t)(ptr - buf) + 4 + (slen > 0 ? slen : 0) > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}    memcpy(ptr, &slen, 4); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}    if (slen > 0 && pkt->{name}.data) {{ memcpy(ptr, pkt->{name}.data, slen); ptr += slen; }}");
+            AppendInvariant(sb, $"    {indent}}}");
         }
         else if (size == 1)
         {
-            AppendInvariant(sb, $"    ptr[0] = (uint8_t)pkt->{name}; ptr += 1;");
+            AppendInvariant(sb, $"    {indent}ptr[0] = (uint8_t)pkt->{name}; ptr += 1;");
         }
         else if (size == 2)
         {
-            AppendInvariant(sb, $"    ptr[0] = (uint8_t)(pkt->{name});");
-            AppendInvariant(sb, $"    ptr[1] = (uint8_t)((pkt->{name}) >> 8); ptr += 2;");
+            AppendInvariant(sb, $"    {indent}ptr[0] = (uint8_t)(pkt->{name});");
+            AppendInvariant(sb, $"    {indent}ptr[1] = (uint8_t)((pkt->{name}) >> 8); ptr += 2;");
         }
         else if (size == 4)
         {
-            AppendInvariant(sb, $"    ptr[0] = (uint8_t)(pkt->{name});");
-            AppendInvariant(sb, $"    ptr[1] = (uint8_t)((pkt->{name}) >> 8);");
-            AppendInvariant(sb, $"    ptr[2] = (uint8_t)((pkt->{name}) >> 16);");
-            AppendInvariant(sb, $"    ptr[3] = (uint8_t)((pkt->{name}) >> 24); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}ptr[0] = (uint8_t)(pkt->{name});");
+            AppendInvariant(sb, $"    {indent}ptr[1] = (uint8_t)((pkt->{name}) >> 8);");
+            AppendInvariant(sb, $"    {indent}ptr[2] = (uint8_t)((pkt->{name}) >> 16);");
+            AppendInvariant(sb, $"    {indent}ptr[3] = (uint8_t)((pkt->{name}) >> 24); ptr += 4;");
         }
         else if (size == 8)
         {
-            AppendInvariant(sb, $"    ptr[0] = (uint8_t)(pkt->{name});");
-            AppendInvariant(sb, $"    ptr[1] = (uint8_t)((pkt->{name}) >> 8);");
-            AppendInvariant(sb, $"    ptr[2] = (uint8_t)((pkt->{name}) >> 16);");
-            AppendInvariant(sb, $"    ptr[3] = (uint8_t)((pkt->{name}) >> 24);");
-            AppendInvariant(sb, $"    ptr[4] = (uint8_t)((pkt->{name}) >> 32);");
-            AppendInvariant(sb, $"    ptr[5] = (uint8_t)((pkt->{name}) >> 40);");
-            AppendInvariant(sb, $"    ptr[6] = (uint8_t)((pkt->{name}) >> 48);");
-            AppendInvariant(sb, $"    ptr[7] = (uint8_t)((pkt->{name}) >> 56); ptr += 8;");
+            AppendInvariant(sb, $"    {indent}ptr[0] = (uint8_t)(pkt->{name});");
+            AppendInvariant(sb, $"    {indent}ptr[1] = (uint8_t)((pkt->{name}) >> 8);");
+            AppendInvariant(sb, $"    {indent}ptr[2] = (uint8_t)((pkt->{name}) >> 16);");
+            AppendInvariant(sb, $"    {indent}ptr[3] = (uint8_t)((pkt->{name}) >> 24);");
+            AppendInvariant(sb, $"    {indent}ptr[4] = (uint8_t)((pkt->{name}) >> 32);");
+            AppendInvariant(sb, $"    {indent}ptr[5] = (uint8_t)((pkt->{name}) >> 40);");
+            AppendInvariant(sb, $"    {indent}ptr[6] = (uint8_t)((pkt->{name}) >> 48);");
+            AppendInvariant(sb, $"    {indent}ptr[7] = (uint8_t)((pkt->{name}) >> 56); ptr += 8;");
+        }
+
+        if (field.IsNullable)
+        {
+            _ = sb.AppendLine("    } else {");
+            _ = sb.AppendLine("        ptr[0] = 0; ptr += 1;");
+            _ = sb.AppendLine("    }");
         }
     }
 
@@ -291,46 +331,66 @@ public sealed class CHeaderGenerator : GeneratorBase
         string name = field.Name;
         int size = GetFieldSize(field);
 
+        if (field.IsNullable)
+        {
+            _ = sb.AppendLine("    if (ptr[0] == 1) {");
+            AppendInvariant(sb, $"        pkt->has_{name} = true;");
+            _ = sb.AppendLine("        ptr += 1;");
+            if (field.CType != "NalixString")
+            {
+                AppendInvariant(sb, $"        if ((size_t)(ptr - buf) + {size} > buf_size) return 0;");
+            }
+        }
+
+        string indent = field.IsNullable ? "    " : "";
+
         if (cs.Contains("PacketHeader", StringComparison.Ordinal))
         {
-            AppendInvariant(sb, $"    memcpy(&pkt->{name}, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;");
+            AppendInvariant(sb, $"    {indent}memcpy(&pkt->{name}, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;");
         }
-        else if (cs == "Nalix.Abstractions.Primitives.Bytes32")
+        else if (cs == KnownTypes.Bytes32)
         {
-            AppendInvariant(sb, $"    memcpy(pkt->{name}.data, ptr, 32); ptr += 32;");
+            AppendInvariant(sb, $"    {indent}memcpy(pkt->{name}.data, ptr, 32); ptr += 32;");
         }
         else if (field.CType == "NalixString")
         {
-            // Length-prefixed UTF-8: read length, bounds check, then allocate and copy
-            _ = sb.AppendLine("    {");
-            _ = sb.AppendLine("        int32_t slen;");
-            _ = sb.AppendLine("        memcpy(&slen, ptr, 4); ptr += 4;");
-            AppendInvariant(sb, $"        pkt->{name}.length = slen;");
-            AppendInvariant(sb, $"        if (slen > 0) {{");
-            _ = sb.AppendLine("            if ((size_t)(ptr - buf) + slen > buf_size) return 0;");
-            AppendInvariant(sb, $"            pkt->{name}.data = (uint8_t*)malloc(slen);");
-            AppendInvariant(sb, $"            memcpy(pkt->{name}.data, ptr, slen);");
-            _ = sb.AppendLine("            ptr += slen;");
-            _ = sb.AppendLine("        } else {");
-            AppendInvariant(sb, $"            pkt->{name}.data = NULL;");
-            _ = sb.AppendLine("        }");
-            _ = sb.AppendLine("    }");
+            AppendInvariant(sb, $"    {indent}{{");
+            AppendInvariant(sb, $"    {indent}    int32_t slen;");
+            AppendInvariant(sb, $"    {indent}    memcpy(&slen, ptr, 4); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}    pkt->{name}.length = slen;");
+            AppendInvariant(sb, $"    {indent}    if (slen > 0) {{");
+            AppendInvariant(sb, $"    {indent}        if ((size_t)(ptr - buf) + slen > buf_size) return 0;");
+            AppendInvariant(sb, $"    {indent}        pkt->{name}.data = (uint8_t*)malloc(slen);");
+            AppendInvariant(sb, $"    {indent}        memcpy(pkt->{name}.data, ptr, slen);");
+            AppendInvariant(sb, $"    {indent}        ptr += slen;");
+            AppendInvariant(sb, $"    {indent}    }} else {{");
+            AppendInvariant(sb, $"    {indent}        pkt->{name}.data = NULL;");
+            AppendInvariant(sb, $"    {indent}    }}");
+            AppendInvariant(sb, $"    {indent}}}");
         }
         else if (size == 1)
         {
-            AppendInvariant(sb, $"    pkt->{name} = ({field.CType})ptr[0]; ptr += 1;");
+            AppendInvariant(sb, $"    {indent}pkt->{name} = ({field.CType})ptr[0]; ptr += 1;");
         }
         else if (size == 2)
         {
-            AppendInvariant(sb, $"    pkt->{name} = ({field.CType})((uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8)); ptr += 2;");
+            AppendInvariant(sb, $"    {indent}pkt->{name} = ({field.CType})((uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8)); ptr += 2;");
         }
         else if (size == 4)
         {
-            AppendInvariant(sb, $"    pkt->{name} = ({field.CType})((uint32_t)ptr[0] | ((uint32_t)ptr[1] << 8) | ((uint32_t)ptr[2] << 16) | ((uint32_t)ptr[3] << 24)); ptr += 4;");
+            AppendInvariant(sb, $"    {indent}pkt->{name} = ({field.CType})((uint32_t)ptr[0] | ((uint32_t)ptr[1] << 8) | ((uint32_t)ptr[2] << 16) | ((uint32_t)ptr[3] << 24)); ptr += 4;");
         }
         else if (size == 8)
         {
-            AppendInvariant(sb, $"    pkt->{name} = ({field.CType})((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;");
+            AppendInvariant(sb, $"    {indent}pkt->{name} = ({field.CType})((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;");
+        }
+
+        if (field.IsNullable)
+        {
+            _ = sb.AppendLine("    } else {");
+            AppendInvariant(sb, $"        pkt->has_{name} = false;");
+            _ = sb.AppendLine("        ptr += 1;");
+            _ = sb.AppendLine("    }");
         }
     }
 
@@ -338,19 +398,32 @@ public sealed class CHeaderGenerator : GeneratorBase
     {
         string name = field.Name;
 
+        if (field.IsNullable)
+        {
+            AppendInvariant(sb, $"    if (a->has_{name} != b->has_{name}) return false;");
+            AppendInvariant(sb, $"    if (a->has_{name}) {{");
+        }
+
+        string indent = field.IsNullable ? "    " : "";
+
         if (field.CType == "NalixString")
         {
-            AppendInvariant(sb, $"    if (a->{name}.length != b->{name}.length) return false;");
-            AppendInvariant(sb, $"    if (a->{name}.length > 0 && memcmp(a->{name}.data, b->{name}.data, a->{name}.length) != 0) return false;");
+            AppendInvariant(sb, $"    {indent}if (a->{name}.length != b->{name}.length) return false;");
+            AppendInvariant(sb, $"    {indent}if (a->{name}.length > 0 && memcmp(a->{name}.data, b->{name}.data, a->{name}.length) != 0) return false;");
         }
         else if (field.CSharpType.Contains("PacketHeader", StringComparison.Ordinal))
         {
-            AppendInvariant(sb, $"    if (memcmp(&a->{name}, &b->{name}, PACKET_HEADER_SIZE) != 0) return false;");
+            AppendInvariant(sb, $"    {indent}if (memcmp(&a->{name}, &b->{name}, PACKET_HEADER_SIZE) != 0) return false;");
         }
         else
         {
             int size = GetFieldSize(field);
-            AppendInvariant(sb, $"    if (memcmp(&a->{name}, &b->{name}, {size}) != 0) return false;");
+            AppendInvariant(sb, $"    {indent}if (memcmp(&a->{name}, &b->{name}, {size}) != 0) return false;");
+        }
+
+        if (field.IsNullable)
+        {
+            _ = sb.AppendLine("    }");
         }
     }
 
@@ -359,7 +432,11 @@ public sealed class CHeaderGenerator : GeneratorBase
         int size = 0;
         foreach (PacketField f in packet.Fields)
         {
-            if (f.CType == "NalixString")
+            if (f.IsNullable)
+            {
+                size += 1; // 1-byte flag only (variable size payload)
+            }
+            else if (f.CType == "NalixString")
             {
                 size += 4; // length prefix only
             }
@@ -392,16 +469,20 @@ public sealed class CHeaderGenerator : GeneratorBase
             AppendInvariant(sb, $"static void test_{lower}_round_trip(void)");
             _ = sb.AppendLine("{");
             AppendInvariant(sb, $"    {p.Name} pkt;");
-            _ = sb.AppendLine("    memset(&pkt, 0, sizeof(pkt));");
+            AppendInvariant(sb, $"    {lower}_init(&pkt);");
             int fieldIdx = 0;
             foreach (PacketField f in p.Fields)
             {
-                string cv = GetCTestValue(f, fieldIdx);
-                if (f.CSharpType.Contains("PacketHeader", StringComparison.Ordinal))
+                if (f.IsHeader)
                 {
-                    AppendInvariant(sb, $"    memset(&pkt.{f.Name}, 0, sizeof(PacketHeader));");
+                    continue;
                 }
-                else if (cv.StartsWith('{'))
+                if (f.IsNullable)
+                {
+                    AppendInvariant(sb, $"    pkt.has_{f.Name} = true;");
+                }
+                string cv = GetCTestValue(f, fieldIdx);
+                if (cv.StartsWith('{'))
                 {
                     AppendInvariant(sb, $"    {{ {f.CType} tmp = {cv}; pkt.{f.Name} = tmp; }}");
                 }
@@ -450,7 +531,7 @@ public sealed class CHeaderGenerator : GeneratorBase
             return "{0}";
         }
 
-        if (cs == "Nalix.Abstractions.Primitives.Bytes32")
+        if (cs == KnownTypes.Bytes32)
         {
             return $"{{{{ 0x{index + 1:X2} }}}}";
         }

@@ -16,69 +16,286 @@ typedef struct { uint8_t data[32]; } Bytes32;
 typedef struct { int32_t length; uint8_t* data; } NalixString;
 void nalix_string_free(NalixString* s);
 
-#define PACKET_HEADER_SIZE 10
+// Nalix v14 standard 6-byte packet header
+#define PACKET_HEADER_SIZE 6
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
     #pragma pack(push, 1)
 #endif
 
 typedef struct {
-    uint32_t MagicNumber;
     uint16_t OpCode;
     uint8_t Flags;
     uint8_t Priority;
     uint16_t SequenceId;
 } PacketHeader;
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
     #pragma pack(pop)
 #endif
 
-// ObservabilityAccess — 46 bytes, magic 0x88DE9D82
-#define PACKET_OBSERVABILITYACCESS 0x88DE9D82U
-#define OBSERVABILITYACCESS_SIZE 46
+// Control — 9 bytes, opcode 0x0001
+#define PACKET_CONTROL_OPCODE 0x0001U
+#define CONTROL_SIZE 9
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(push, 1)
+#endif
+
+typedef struct {
+    PacketHeader Header;
+    uint16_t Reason;
+    uint8_t Type;
+} Control;
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(pop)
+#endif
+
+void control_init(Control* pkt);
+size_t control_serialize(const Control* pkt, uint8_t* buf, size_t buf_size);
+size_t control_deserialize(Control* pkt, const uint8_t* buf, size_t buf_size);
+bool control_equals(const Control* a, const Control* b);
+
+// Directive — 21 bytes, opcode 0x0008
+#define PACKET_DIRECTIVE_OPCODE 0x0008U
+#define DIRECTIVE_SIZE 21
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(push, 1)
+#endif
+
+typedef struct {
+    PacketHeader Header;
+    uint8_t Type;
+    uint16_t Reason;
+    uint8_t Action;
+    uint8_t Control;
+    uint32_t Arg0;
+    uint32_t Arg1;
+    uint16_t Arg2;
+} Directive;
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(pop)
+#endif
+
+void directive_init(Directive* pkt);
+size_t directive_serialize(const Directive* pkt, uint8_t* buf, size_t buf_size);
+size_t directive_deserialize(Directive* pkt, const uint8_t* buf, size_t buf_size);
+bool directive_equals(const Directive* a, const Directive* b);
+
+// ProofOfWorkChallenge — 79 bytes, opcode 0x000A
+#define PACKET_PROOFOFWORKCHALLENGE_OPCODE 0x000AU
+#define PROOFOFWORKCHALLENGE_SIZE 79
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(push, 1)
+#endif
+
+typedef struct {
+    PacketHeader Header;
+    Bytes32 Nonce;
+    uint8_t Difficulty;
+    int64_t TimestampTicks;
+    Bytes32 Mac;
+} ProofOfWorkChallenge;
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(pop)
+#endif
+
+void proofofworkchallenge_init(ProofOfWorkChallenge* pkt);
+size_t proofofworkchallenge_serialize(const ProofOfWorkChallenge* pkt, uint8_t* buf, size_t buf_size);
+size_t proofofworkchallenge_deserialize(ProofOfWorkChallenge* pkt, const uint8_t* buf, size_t buf_size);
+bool proofofworkchallenge_equals(const ProofOfWorkChallenge* a, const ProofOfWorkChallenge* b);
+
+// ProofOfWorkProof — 87 bytes, opcode 0x000B
+#define PACKET_PROOFOFWORKPROOF_OPCODE 0x000BU
+#define PROOFOFWORKPROOF_SIZE 87
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(push, 1)
+#endif
+
+typedef struct {
+    PacketHeader Header;
+    Bytes32 Nonce;
+    uint8_t Difficulty;
+    int64_t TimestampTicks;
+    Bytes32 Mac;
+    int64_t Solution;
+} ProofOfWorkProof;
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(pop)
+#endif
+
+void proofofworkproof_init(ProofOfWorkProof* pkt);
+size_t proofofworkproof_serialize(const ProofOfWorkProof* pkt, uint8_t* buf, size_t buf_size);
+size_t proofofworkproof_deserialize(ProofOfWorkProof* pkt, const uint8_t* buf, size_t buf_size);
+bool proofofworkproof_equals(const ProofOfWorkProof* a, const ProofOfWorkProof* b);
+
+// SessionChallenge — 102 bytes, opcode 0x0006
+#define PACKET_SESSIONCHALLENGE_OPCODE 0x0006U
+#define SESSIONCHALLENGE_SIZE 102
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(push, 1)
+#endif
+
+typedef struct {
+    PacketHeader Header;
+    Bytes32 PublicKey;
+    Bytes32 Nonce;
+    Bytes32 Proof;
+} SessionChallenge;
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(pop)
+#endif
+
+void sessionchallenge_init(SessionChallenge* pkt);
+size_t sessionchallenge_serialize(const SessionChallenge* pkt, uint8_t* buf, size_t buf_size);
+size_t sessionchallenge_deserialize(SessionChallenge* pkt, const uint8_t* buf, size_t buf_size);
+bool sessionchallenge_equals(const SessionChallenge* a, const SessionChallenge* b);
+
+// SessionEstablished — 46 bytes, opcode 0x0007
+#define PACKET_SESSIONESTABLISHED_OPCODE 0x0007U
+#define SESSIONESTABLISHED_SIZE 46
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(push, 1)
+#endif
+
+typedef struct {
+    PacketHeader Header;
+    Bytes32 Proof;
+    uint64_t SessionToken;
+} SessionEstablished;
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(pop)
+#endif
+
+void sessionestablished_init(SessionEstablished* pkt);
+size_t sessionestablished_serialize(const SessionEstablished* pkt, uint8_t* buf, size_t buf_size);
+size_t sessionestablished_deserialize(SessionEstablished* pkt, const uint8_t* buf, size_t buf_size);
+bool sessionestablished_equals(const SessionEstablished* a, const SessionEstablished* b);
+
+// SessionInit — 70 bytes, opcode 0x0000
+#define PACKET_SESSIONINIT_OPCODE 0x0000U
+#define SESSIONINIT_SIZE 70
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(push, 1)
+#endif
+
+typedef struct {
+    PacketHeader Header;
+    Bytes32 PublicKey;
+    Bytes32 Nonce;
+} SessionInit;
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(pop)
+#endif
+
+void sessioninit_init(SessionInit* pkt);
+size_t sessioninit_serialize(const SessionInit* pkt, uint8_t* buf, size_t buf_size);
+size_t sessioninit_deserialize(SessionInit* pkt, const uint8_t* buf, size_t buf_size);
+bool sessioninit_equals(const SessionInit* a, const SessionInit* b);
+
+// SessionProof — 38 bytes, opcode 0x0003
+#define PACKET_SESSIONPROOF_OPCODE 0x0003U
+#define SESSIONPROOF_SIZE 38
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(push, 1)
+#endif
+
+typedef struct {
+    PacketHeader Header;
+    Bytes32 Proof;
+} SessionProof;
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(pop)
+#endif
+
+void sessionproof_init(SessionProof* pkt);
+size_t sessionproof_serialize(const SessionProof* pkt, uint8_t* buf, size_t buf_size);
+size_t sessionproof_deserialize(SessionProof* pkt, const uint8_t* buf, size_t buf_size);
+bool sessionproof_equals(const SessionProof* a, const SessionProof* b);
+
+// SessionResume — 49 bytes, opcode 0x0002
+#define PACKET_SESSIONRESUME_OPCODE 0x0002U
+#define SESSIONRESUME_SIZE 49
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
     #pragma pack(push, 1)
 #endif
 
 typedef struct {
     PacketHeader Header;
     uint8_t Stage;
+    uint64_t SessionToken;
     uint16_t Reason;
-    uint8_t AccessLevel;
-    Bytes32 AccessKey;
-} ObservabilityAccess;
+    Bytes32 Proof;
+} SessionResume;
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
     #pragma pack(pop)
 #endif
 
-size_t observabilityaccess_serialize(const ObservabilityAccess* pkt, uint8_t* buf, size_t buf_size);
-size_t observabilityaccess_deserialize(ObservabilityAccess* pkt, const uint8_t* buf, size_t buf_size);
-bool observabilityaccess_equals(const ObservabilityAccess* a, const ObservabilityAccess* b);
+void sessionresume_init(SessionResume* pkt);
+size_t sessionresume_serialize(const SessionResume* pkt, uint8_t* buf, size_t buf_size);
+size_t sessionresume_deserialize(SessionResume* pkt, const uint8_t* buf, size_t buf_size);
+bool sessionresume_equals(const SessionResume* a, const SessionResume* b);
 
-// RuntimeObservation — 18 bytes, magic 0x74AE4C55
-#define PACKET_RUNTIMEOBSERVATION 0x74AE4C55U
-#define RUNTIMEOBSERVATION_SIZE 18
+// SessionTofu — 38 bytes, opcode 0x0005
+#define PACKET_SESSIONTOFU_OPCODE 0x0005U
+#define SESSIONTOFU_SIZE 38
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
     #pragma pack(push, 1)
 #endif
 
 typedef struct {
     PacketHeader Header;
-    uint8_t Stage;
-    uint8_t Target;
-    uint16_t Reason;
-    NalixString ObservationData;
-} RuntimeObservation;
+    Bytes32 PublicKey;
+} SessionTofu;
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
     #pragma pack(pop)
 #endif
 
-size_t runtimeobservation_serialize(const RuntimeObservation* pkt, uint8_t* buf, size_t buf_size);
-size_t runtimeobservation_deserialize(RuntimeObservation* pkt, const uint8_t* buf, size_t buf_size);
-bool runtimeobservation_equals(const RuntimeObservation* a, const RuntimeObservation* b);
+void sessiontofu_init(SessionTofu* pkt);
+size_t sessiontofu_serialize(const SessionTofu* pkt, uint8_t* buf, size_t buf_size);
+size_t sessiontofu_deserialize(SessionTofu* pkt, const uint8_t* buf, size_t buf_size);
+bool sessiontofu_equals(const SessionTofu* a, const SessionTofu* b);
+
+// TimeSync — 23 bytes, opcode 0x0004
+#define PACKET_TIMESYNC_OPCODE 0x0004U
+#define TIMESYNC_SIZE 23
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(push, 1)
+#endif
+
+typedef struct {
+    PacketHeader Header;
+    uint8_t Type;
+    int64_t Timestamp;
+    int64_t MonoTicks;
+} TimeSync;
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+    #pragma pack(pop)
+#endif
+
+void timesync_init(TimeSync* pkt);
+size_t timesync_serialize(const TimeSync* pkt, uint8_t* buf, size_t buf_size);
+size_t timesync_deserialize(TimeSync* pkt, const uint8_t* buf, size_t buf_size);
+bool timesync_equals(const TimeSync* a, const TimeSync* b);
 

@@ -1,21 +1,17 @@
 // Copyright (c) 2026 PPN Corporation. All rights reserved.
 // Licensed under the Apache License, Version 2.0.
 
-using Nalix.Abstractions.Networking.Packets;
-using Nalix.Abstractions.Serialization;
-
 namespace Nalix.Protogen.Roslyn;
 
 /// <summary>
-/// Centralized, type-safe attribute metadata names.
-/// Sử dụng typeof để compiler check ngay, không còn hard-code string.
+/// Centralized type metadata attribute names.
+/// Decoupled from runtime assemblies so the analyzer can parse any Nalix version.
 /// </summary>
 internal static class KnownAttributes
 {
-    public static readonly string Packet = typeof(PacketAttribute).FullName!;
-
-    public static readonly string SerializeOrder = typeof(SerializeOrderAttribute).FullName!;
-    public static readonly string SerializeHeader = typeof(SerializeHeaderAttribute).FullName!;
-    public static readonly string SerializeIgnore = typeof(SerializeIgnoreAttribute).FullName!;
-    public static readonly string SerializePackable = typeof(SerializePackableAttribute).FullName!;
+    public const string Packet = "Nalix.Abstractions.Networking.Packets.PacketAttribute";
+    public const string SerializeOrder = "Nalix.Abstractions.Serialization.SerializeOrderAttribute";
+    public const string SerializeHeader = "Nalix.Abstractions.Serialization.SerializeHeaderAttribute";
+    public const string SerializeIgnore = "Nalix.Abstractions.Serialization.SerializeIgnoreAttribute";
+    public const string SerializePackable = "Nalix.Abstractions.Serialization.SerializePackableAttribute";
 }

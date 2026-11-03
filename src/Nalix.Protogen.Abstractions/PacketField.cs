@@ -11,4 +11,5 @@ public sealed record PacketField(
     bool IsHeader,
     int Size,
     bool IsUnmanaged,
+    bool IsNullable,
     string? Comment);

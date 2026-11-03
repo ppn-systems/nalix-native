@@ -8,7 +8,8 @@ namespace Nalix.Protogen.Roslyn.Rust;
 
 /// <summary>
 /// Generates native Rust structs and serialize/deserialize implementations
-/// for Nalix protocol frames. No FFI, no extern "C" — pure Rust code.
+/// for Nalix protocol frames. Compatible with Nalix v14 6-byte header.
+/// No FFI, no extern "C" — pure Rust code.
 /// </summary>
 public sealed class RustGenerator : GeneratorBase
 {
@@ -54,9 +55,9 @@ public sealed class RustGenerator : GeneratorBase
 
     private static void GenerateHeaderStruct(StringBuilder sb, PacketDefinition header)
     {
-        _ = sb.AppendLine("/// Common 10-byte packet header.");
+        _ = sb.AppendLine("/// Common Nalix v14 6-byte packet header.");
         _ = sb.AppendLine("#[repr(C)]");
-        _ = sb.AppendLine("#[derive(Debug, Clone, Copy, Default, PartialEq)]");
+        _ = sb.AppendLine("#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]");
         _ = sb.AppendLine("pub struct PacketHeader {");
 
         foreach (PacketField f in header.Fields)
@@ -68,31 +69,30 @@ public sealed class RustGenerator : GeneratorBase
         _ = sb.AppendLine("}");
         _ = sb.AppendLine();
         _ = sb.AppendLine("impl PacketHeader {");
-        _ = sb.AppendLine("    pub const SIZE: usize = 10;");
+        _ = sb.AppendLine("    pub const SIZE: usize = 6;");
+        _ = sb.AppendLine();
+        _ = sb.AppendLine("    pub fn serialize_to_bytes(&self) -> [u8; 6] {");
+        _ = sb.AppendLine("        let mut buf = [0u8; 6];");
+        _ = sb.AppendLine("        buf[0..2].copy_from_slice(&self.op_code.to_le_bytes());");
+        _ = sb.AppendLine("        buf[2] = self.flags;");
+        _ = sb.AppendLine("        buf[3] = self.priority;");
+        _ = sb.AppendLine("        buf[4..6].copy_from_slice(&self.sequence_id.to_le_bytes());");
+        _ = sb.AppendLine("        buf");
+        _ = sb.AppendLine("    }");
         _ = sb.AppendLine();
         _ = sb.AppendLine("    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {");
         _ = sb.AppendLine("        if buf.len() < Self::SIZE { return Err(()); }");
-        _ = sb.AppendLine("        let mut offset = 0;");
-
-        foreach (PacketField f in header.Fields)
-        {
-            WriteRustSerializeField(sb, f, "self", "        ");
-        }
-
+        _ = sb.AppendLine("        buf[..Self::SIZE].copy_from_slice(&self.serialize_to_bytes());");
         _ = sb.AppendLine("        Ok(Self::SIZE)");
         _ = sb.AppendLine("    }");
         _ = sb.AppendLine();
         _ = sb.AppendLine("    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {");
         _ = sb.AppendLine("        if buf.len() < Self::SIZE { return Err(()); }");
-        _ = sb.AppendLine("        let mut h = Self::default();");
-        _ = sb.AppendLine("        let mut offset = 0;");
-
-        foreach (PacketField f in header.Fields)
-        {
-            WriteRustDeserializeField(sb, f, "h", "        ");
-        }
-
-        _ = sb.AppendLine("        Ok(h)");
+        _ = sb.AppendLine("        let op_code = u16::from_le_bytes([buf[0], buf[1]]);");
+        _ = sb.AppendLine("        let flags = buf[2];");
+        _ = sb.AppendLine("        let priority = buf[3];");
+        _ = sb.AppendLine("        let sequence_id = u16::from_le_bytes([buf[4], buf[5]]);");
+        _ = sb.AppendLine("        Ok(Self { op_code, flags, priority, sequence_id })");
         _ = sb.AppendLine("    }");
         _ = sb.AppendLine("}");
         _ = sb.AppendLine();
@@ -103,16 +103,17 @@ public sealed class RustGenerator : GeneratorBase
         foreach (PacketDefinition packet in packets)
         {
             string name = packet.Name;
-            bool hasVariable = packet.Fields.Any(f => f.CType == "NalixString");
+            bool hasVariable = packet.Fields.Any(f => f.CType == "NalixString" || f.IsNullable);
             int fixedSize = CalculateFixedSize(packet);
+            int wireSize = CalculateWireSize(packet);
 
             if (hasVariable)
             {
-                AppendInvariant(sb, $"/// {name} — fixed: {fixedSize} bytes + variable, magic: 0x{packet.Magic:X8}");
+                AppendInvariant(sb, $"/// {name} — fixed: {fixedSize} bytes + variable, opcode: 0x{packet.OpCode:X4}");
             }
             else
             {
-                AppendInvariant(sb, $"/// {name} — wire size: {fixedSize} bytes, magic: 0x{packet.Magic:X8}");
+                AppendInvariant(sb, $"/// {name} — wire size: {wireSize} bytes, opcode: 0x{packet.OpCode:X4}");
             }
 
             // Struct — cannot derive Copy/Clone for Vec<u8>
@@ -131,6 +132,10 @@ public sealed class RustGenerator : GeneratorBase
             foreach (PacketField f in packet.Fields)
             {
                 string rustType = MapRustType(f);
+                if (f.IsNullable)
+                {
+                    rustType = $"Option<{rustType}>";
+                }
                 AppendInvariant(sb, $"    pub {ToSnakeCase(f.Name)}: {rustType},");
             }
 
@@ -138,20 +143,14 @@ public sealed class RustGenerator : GeneratorBase
             _ = sb.AppendLine();
             AppendInvariant(sb, $"impl {name} {{");
             AppendInvariant(sb, $"    pub const FIXED_SIZE: usize = {fixedSize};");
-            AppendInvariant(sb, $"    pub const MAGIC: u32 = 0x{packet.Magic:X8};");
+            AppendInvariant(sb, $"    pub const OPCODE: u16 = 0x{packet.OpCode:X4};");
             _ = sb.AppendLine();
 
             if (hasVariable)
             {
                 // Variable-size serialize
                 _ = sb.AppendLine("    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {");
-                AppendInvariant(sb, $"        let required = {fixedSize}");
-                foreach (PacketField f in packet.Fields.Where(f => f.CType == "NalixString"))
-                {
-                    AppendInvariant(sb, $"            + self.{ToSnakeCase(f.Name)}.len()");
-                }
-                _ = sb.AppendLine("        ;");
-                _ = sb.AppendLine("        if buf.len() < required { return Err(()); }");
+                AppendInvariant(sb, $"        if buf.len() < Self::FIXED_SIZE {{ return Err(()); }}");
                 _ = sb.AppendLine("        let mut offset = 0;");
 
                 foreach (PacketField f in packet.Fields)
@@ -163,9 +162,9 @@ public sealed class RustGenerator : GeneratorBase
                 _ = sb.AppendLine("    }");
                 _ = sb.AppendLine();
 
-                // Variable-size deserialize with bounds checks
+                // Variable-size deserialize
                 _ = sb.AppendLine("    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {");
-                AppendInvariant(sb, $"        if buf.len() < {fixedSize} {{ return Err(()); }}");
+                AppendInvariant(sb, $"        if buf.len() < Self::FIXED_SIZE {{ return Err(()); }}");
                 _ = sb.AppendLine("        let mut pkt = Self::default();");
                 _ = sb.AppendLine("        let mut offset = 0;");
 
@@ -175,12 +174,6 @@ public sealed class RustGenerator : GeneratorBase
                 }
 
                 _ = sb.AppendLine("        Ok(pkt)");
-                _ = sb.AppendLine("    }");
-                _ = sb.AppendLine();
-
-                // Serialize-based equals for variable packets
-                _ = sb.AppendLine("    pub fn equals(&self, other: &Self) -> bool {");
-                _ = sb.AppendLine("        self == other");
                 _ = sb.AppendLine("    }");
             }
             else
@@ -195,7 +188,7 @@ public sealed class RustGenerator : GeneratorBase
                     WriteRustSerializeField(sb, f, "self", "        ");
                 }
 
-                _ = sb.AppendLine("        Ok(Self::FIXED_SIZE)");
+                AppendInvariant(sb, $"        Ok(Self::FIXED_SIZE)");
                 _ = sb.AppendLine("    }");
                 _ = sb.AppendLine();
 
@@ -212,16 +205,6 @@ public sealed class RustGenerator : GeneratorBase
 
                 _ = sb.AppendLine("        Ok(pkt)");
                 _ = sb.AppendLine("    }");
-                _ = sb.AppendLine();
-
-                // memcmp equals for fixed-size
-                _ = sb.AppendLine("    pub fn equals(&self, other: &Self) -> bool {");
-                AppendInvariant(sb, $"        let mut a = [0u8; Self::FIXED_SIZE];");
-                AppendInvariant(sb, $"        let mut b = [0u8; Self::FIXED_SIZE];");
-                _ = sb.AppendLine("        let _ = self.serialize(&mut a);");
-                _ = sb.AppendLine("        let _ = other.serialize(&mut b);");
-                _ = sb.AppendLine("        a == b");
-                _ = sb.AppendLine("    }");
             }
 
             _ = sb.AppendLine("}");
@@ -234,7 +217,11 @@ public sealed class RustGenerator : GeneratorBase
         int size = 0;
         foreach (PacketField f in packet.Fields)
         {
-            if (f.CType == "NalixString")
+            if (f.IsNullable)
+            {
+                size += 1;
+            }
+            else if (f.CType == "NalixString")
             {
                 size += 4; // length prefix only
             }
@@ -252,43 +239,66 @@ public sealed class RustGenerator : GeneratorBase
         string cs = field.CSharpType;
         int size = GetFieldSize(field);
 
+        if (field.IsNullable)
+        {
+            AppendInvariant(sb, $"{indent}match &{obj}.{snake} {{");
+            AppendInvariant(sb, $"{indent}    Some(val) => {{");
+            AppendInvariant(sb, $"{indent}        buf[offset] = 1;");
+            AppendInvariant(sb, $"{indent}        offset += 1;");
+            indent += "        ";
+        }
+
+        string valRef = field.IsNullable ? "val" : $"&{obj}.{snake}";
+        string valDeref = field.IsNullable ? "(*val)" : $"{obj}.{snake}";
+
         if (cs.Contains("PacketHeader", StringComparison.Ordinal))
         {
-            AppendInvariant(sb, $"{indent}buf[offset..offset+{size}].copy_from_slice(&{obj}.{snake}.serialize_to_bytes());");
+            AppendInvariant(sb, $"{indent}buf[offset..offset+{size}].copy_from_slice(&{valDeref}.serialize_to_bytes());");
             AppendInvariant(sb, $"{indent}offset += {size};");
         }
-        else if (string.Equals(cs, "Nalix.Abstractions.Primitives.Bytes32", StringComparison.Ordinal))
+        else if (string.Equals(cs, KnownTypes.Bytes32, StringComparison.Ordinal))
         {
-            AppendInvariant(sb, $"{indent}buf[offset..offset+32].copy_from_slice(&{obj}.{snake});");
+            AppendInvariant(sb, $"{indent}buf[offset..offset+32].copy_from_slice({valRef});");
             AppendInvariant(sb, $"{indent}offset += 32;");
         }
         else if (string.Equals(cs, "string", StringComparison.Ordinal) || string.Equals(cs, "System.String", StringComparison.Ordinal))
         {
             // Length-prefixed UTF-8: [i32 length][bytes]
-            AppendInvariant(sb, $"{indent}let slen = {obj}.{snake}.len() as i32;");
+            AppendInvariant(sb, $"{indent}let slen = {valDeref}.len() as i32;");
             AppendInvariant(sb, $"{indent}buf[offset..offset+4].copy_from_slice(&slen.to_le_bytes());");
             AppendInvariant(sb, $"{indent}offset += 4;");
-            AppendInvariant(sb, $"{indent}if slen > 0 {{ buf[offset..offset+slen as usize].copy_from_slice(&{obj}.{snake}); offset += slen as usize; }}");
+            AppendInvariant(sb, $"{indent}if slen > 0 {{ buf[offset..offset+slen as usize].copy_from_slice({valRef}); offset += slen as usize; }}");
         }
         else if (size == 1)
         {
-            AppendInvariant(sb, $"{indent}buf[offset] = {obj}.{snake} as u8;");
+            AppendInvariant(sb, $"{indent}buf[offset] = {valDeref} as u8;");
             AppendInvariant(sb, $"{indent}offset += 1;");
         }
         else if (size == 2)
         {
-            AppendInvariant(sb, $"{indent}buf[offset..offset+2].copy_from_slice(&({obj}.{snake} as u16).to_le_bytes());");
+            AppendInvariant(sb, $"{indent}buf[offset..offset+2].copy_from_slice(&({valDeref} as u16).to_le_bytes());");
             AppendInvariant(sb, $"{indent}offset += 2;");
         }
         else if (size == 4)
         {
-            AppendInvariant(sb, $"{indent}buf[offset..offset+4].copy_from_slice(&({obj}.{snake} as u32).to_le_bytes());");
+            AppendInvariant(sb, $"{indent}buf[offset..offset+4].copy_from_slice(&({valDeref} as u32).to_le_bytes());");
             AppendInvariant(sb, $"{indent}offset += 4;");
         }
         else if (size == 8)
         {
-            AppendInvariant(sb, $"{indent}buf[offset..offset+8].copy_from_slice(&({obj}.{snake} as u64).to_le_bytes());");
+            AppendInvariant(sb, $"{indent}buf[offset..offset+8].copy_from_slice(&({valDeref} as u64).to_le_bytes());");
             AppendInvariant(sb, $"{indent}offset += 8;");
+        }
+
+        if (field.IsNullable)
+        {
+            indent = indent.Substring(0, indent.Length - 8);
+            AppendInvariant(sb, $"{indent}    }}");
+            AppendInvariant(sb, $"{indent}    None => {{");
+            AppendInvariant(sb, $"{indent}        buf[offset] = 0;");
+            AppendInvariant(sb, $"{indent}        offset += 1;");
+            AppendInvariant(sb, $"{indent}    }}");
+            AppendInvariant(sb, $"{indent}}}");
         }
     }
 
@@ -298,50 +308,87 @@ public sealed class RustGenerator : GeneratorBase
         string cs = field.CSharpType;
         int size = GetFieldSize(field);
 
+        if (field.IsNullable)
+        {
+            AppendInvariant(sb, $"{indent}if buf[offset] == 1 {{");
+            AppendInvariant(sb, $"{indent}    offset += 1;");
+            indent += "    ";
+        }
+
+        string target = field.IsNullable ? "let val" : $"{obj}.{snake}";
+
         if (cs.Contains("PacketHeader", StringComparison.Ordinal))
         {
-            AppendInvariant(sb, $"{indent}{obj}.{snake} = PacketHeader::deserialize(&buf[offset..offset+{size}]).map_err(|_| ())?;");
+            AppendInvariant(sb, $"{indent}{target} = PacketHeader::deserialize(&buf[offset..offset+{size}]).map_err(|_| ())?;");
             AppendInvariant(sb, $"{indent}offset += {size};");
         }
-        else if (string.Equals(cs, "Nalix.Abstractions.Primitives.Bytes32", StringComparison.Ordinal))
+        else if (string.Equals(cs, KnownTypes.Bytes32, StringComparison.Ordinal))
         {
-            AppendInvariant(sb, $"{indent}{obj}.{snake}.copy_from_slice(&buf[offset..offset+32]);");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}let mut val = [0u8; 32];");
+                AppendInvariant(sb, $"{indent}val.copy_from_slice(&buf[offset..offset+32]);");
+            }
+            else
+            {
+                AppendInvariant(sb, $"{indent}{target}.copy_from_slice(&buf[offset..offset+32]);");
+            }
             AppendInvariant(sb, $"{indent}offset += 32;");
         }
         else if (string.Equals(cs, "string", StringComparison.Ordinal) || string.Equals(cs, "System.String", StringComparison.Ordinal))
         {
-            // Length-prefixed UTF-8: read length, bounds check, then copy bytes
             AppendInvariant(sb, $"{indent}let slen = i32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());");
             AppendInvariant(sb, $"{indent}offset += 4;");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}let mut val = Vec::new();");
+            }
             AppendInvariant(sb, $"{indent}if slen > 0 {{");
             AppendInvariant(sb, $"{indent}    if buf.len() < offset + slen as usize {{ return Err(()); }}");
-            AppendInvariant(sb, $"{indent}    {obj}.{snake} = buf[offset..offset+slen as usize].to_vec();");
+            if (field.IsNullable)
+            {
+                AppendInvariant(sb, $"{indent}    val = buf[offset..offset+slen as usize].to_vec();");
+            }
+            else
+            {
+                AppendInvariant(sb, $"{indent}    {target} = buf[offset..offset+slen as usize].to_vec();");
+            }
             AppendInvariant(sb, $"{indent}    offset += slen as usize;");
             AppendInvariant(sb, $"{indent}}}");
         }
         else if (size == 1)
         {
             string rustType = MapRustType(field);
-            AppendInvariant(sb, $"{indent}{obj}.{snake} = buf[offset] as {rustType};");
+            AppendInvariant(sb, $"{indent}{target} = buf[offset] as {rustType};");
             AppendInvariant(sb, $"{indent}offset += 1;");
         }
         else if (size == 2)
         {
             string rustType = MapRustType(field);
-            AppendInvariant(sb, $"{indent}{obj}.{snake} = {rustType}::from_le_bytes([buf[offset], buf[offset+1]]);");
+            AppendInvariant(sb, $"{indent}{target} = {rustType}::from_le_bytes([buf[offset], buf[offset+1]]);");
             AppendInvariant(sb, $"{indent}offset += 2;");
         }
         else if (size == 4)
         {
             string rustType = MapRustType(field);
-            AppendInvariant(sb, $"{indent}{obj}.{snake} = {rustType}::from_le_bytes(buf[offset..offset+4].try_into().unwrap());");
+            AppendInvariant(sb, $"{indent}{target} = {rustType}::from_le_bytes(buf[offset..offset+4].try_into().unwrap());");
             AppendInvariant(sb, $"{indent}offset += 4;");
         }
         else if (size == 8)
         {
             string rustType = MapRustType(field);
-            AppendInvariant(sb, $"{indent}{obj}.{snake} = {rustType}::from_le_bytes(buf[offset..offset+8].try_into().unwrap());");
+            AppendInvariant(sb, $"{indent}{target} = {rustType}::from_le_bytes(buf[offset..offset+8].try_into().unwrap());");
             AppendInvariant(sb, $"{indent}offset += 8;");
+        }
+
+        if (field.IsNullable)
+        {
+            AppendInvariant(sb, $"{indent}{obj}.{snake} = Some(val);");
+            indent = indent.Substring(0, indent.Length - 4);
+            AppendInvariant(sb, $"{indent}}} else {{");
+            AppendInvariant(sb, $"{indent}    {obj}.{snake} = None;");
+            AppendInvariant(sb, $"{indent}    offset += 1;");
+            AppendInvariant(sb, $"{indent}}}");
         }
     }
 
@@ -369,13 +416,18 @@ public sealed class RustGenerator : GeneratorBase
             int fieldIdx = 0;
             foreach (PacketField f in packet.Fields)
             {
+                if (f.IsHeader)
+                {
+                    continue;
+                }
                 string fsnake = ToSnakeCase(f.Name);
                 string testValue = GetTestValue(f, fieldIdx);
                 AppendInvariant(sb, $"        pkt.{fsnake} = {testValue};");
                 fieldIdx++;
             }
 
-            bool hasVariable = packet.Fields.Any(f => f.CType == "NalixString");
+            bool hasVariable = packet.Fields.Any(f => f.CType == "NalixString" || f.IsNullable);
+            int fixedSize = CalculateFixedSize(packet);
 
             _ = sb.AppendLine();
             if (hasVariable)
@@ -416,36 +468,39 @@ public sealed class RustGenerator : GeneratorBase
     private static string GetTestValue(PacketField field, int index)
     {
         string rustType = MapRustType(field);
+        string val = "";
 
         if (rustType == "Vec<u8>")
         {
-            return "vec![]";
+            val = "vec![]";
+        }
+        else if (rustType == "[u8; 32]")
+        {
+            val = FormattableString.Invariant($"[0x{index + 1:X2}u8; 32]");
+        }
+        else if (rustType == "PacketHeader")
+        {
+            val = "PacketHeader::default()";
+        }
+        else
+        {
+            val = rustType switch
+            {
+                "u8" => FormattableString.Invariant($"0x{index + 1:X2}u8"),
+                "i8" => FormattableString.Invariant($"0x{index + 1:X2}i8"),
+                "u16" => FormattableString.Invariant($"0x{index + 100:X4}u16"),
+                "i16" => FormattableString.Invariant($"0x{index + 100:X4}i16"),
+                "u32" => FormattableString.Invariant($"0x{index + 1000:X8}u32"),
+                "i32" => FormattableString.Invariant($"0x{index + 1000:X8}i32"),
+                "u64" => FormattableString.Invariant($"0x{index + 10000:X16}u64"),
+                "i64" => FormattableString.Invariant($"0x{index + 10000:X16}i64"),
+                "f32" => FormattableString.Invariant($"{index + 1.0f}f32"),
+                "f64" => FormattableString.Invariant($"{index + 1.0}f64"),
+                _ => "0"
+            };
         }
 
-        if (rustType == "[u8; 32]")
-        {
-            return FormattableString.Invariant($"[0x{index + 1:X2}u8; 32]");
-        }
-
-        if (rustType == "PacketHeader")
-        {
-            return "PacketHeader::default()";
-        }
-
-        return rustType switch
-        {
-            "u8" => FormattableString.Invariant($"0x{index + 1:X2}u8"),
-            "i8" => FormattableString.Invariant($"0x{index + 1:X2}i8"),
-            "u16" => FormattableString.Invariant($"0x{index + 100:X4}u16"),
-            "i16" => FormattableString.Invariant($"0x{index + 100:X4}i16"),
-            "u32" => FormattableString.Invariant($"0x{index + 1000:X8}u32"),
-            "i32" => FormattableString.Invariant($"0x{index + 1000:X8}i32"),
-            "u64" => FormattableString.Invariant($"0x{index + 10000:X16}u64"),
-            "i64" => FormattableString.Invariant($"0x{index + 10000:X16}i64"),
-            "f32" => FormattableString.Invariant($"{index + 1.0f}f32"),
-            "f64" => FormattableString.Invariant($"{index + 1.0}f64"),
-            _ => "0"
-        };
+        return field.IsNullable ? $"Some({val})" : val;
     }
 
     private static string MapRustType(PacketField field)
@@ -457,7 +512,7 @@ public sealed class RustGenerator : GeneratorBase
             return "PacketHeader";
         }
 
-        if (string.Equals(cs, "Nalix.Abstractions.Primitives.Bytes32", StringComparison.Ordinal))
+        if (string.Equals(cs, KnownTypes.Bytes32, StringComparison.Ordinal))
         {
             return "[u8; 32]";
         }

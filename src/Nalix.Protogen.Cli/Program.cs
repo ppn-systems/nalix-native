@@ -1,7 +1,6 @@
 // Copyright (c) 2026 PPN Corporation. All rights reserved.
 // Licensed under the Apache License, Version 2.0.
 
-using Nalix.Abstractions.Exceptions;
 using Nalix.Protogen.Abstractions;
 using Nalix.Protogen.Roslyn.C;
 using Nalix.Protogen.Roslyn.Rust;
@@ -125,7 +124,7 @@ internal static class Program
             Console.WriteLine($"  Generated {count} file(s) in: {fullDir}");
             Console.WriteLine();
         }
-        catch (Exception ex) when (ExceptionClassifier.IsNonFatal(ex))
+        catch (Exception ex) when (IsNonFatal(ex))
         {
             Console.WriteLine($"  ERROR: {ex.Message}");
             if (verbose)
@@ -135,6 +134,8 @@ internal static class Program
             System.Environment.Exit(1);
         }
     }
+
+    private static bool IsNonFatal(Exception ex) => ex is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
 
     private static void ShowHelp()
     {

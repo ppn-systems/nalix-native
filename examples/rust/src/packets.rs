@@ -5,11 +5,10 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-/// Common 10-byte packet header.
+/// Common Nalix v14 6-byte packet header.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PacketHeader {
-    pub magic_number: u32,
     pub op_code: u16,
     pub flags: u8,
     pub priority: u8,
@@ -17,69 +16,163 @@ pub struct PacketHeader {
 }
 
 impl PacketHeader {
-    pub const SIZE: usize = 10;
+    pub const SIZE: usize = 6;
+
+    pub fn serialize_to_bytes(&self) -> [u8; 6] {
+        let mut buf = [0u8; 6];
+        buf[0..2].copy_from_slice(&self.op_code.to_le_bytes());
+        buf[2] = self.flags;
+        buf[3] = self.priority;
+        buf[4..6].copy_from_slice(&self.sequence_id.to_le_bytes());
+        buf
+    }
 
     pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
         if buf.len() < Self::SIZE { return Err(()); }
-        let mut offset = 0;
-        buf[offset..offset+4].copy_from_slice(&(self.magic_number as u32).to_le_bytes());
-        offset += 4;
-        buf[offset..offset+2].copy_from_slice(&(self.op_code as u16).to_le_bytes());
-        offset += 2;
-        buf[offset] = self.flags as u8;
-        offset += 1;
-        buf[offset] = self.priority as u8;
-        offset += 1;
-        buf[offset..offset+2].copy_from_slice(&(self.sequence_id as u16).to_le_bytes());
-        offset += 2;
+        buf[..Self::SIZE].copy_from_slice(&self.serialize_to_bytes());
         Ok(Self::SIZE)
     }
 
     pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
         if buf.len() < Self::SIZE { return Err(()); }
-        let mut h = Self::default();
-        let mut offset = 0;
-        h.magic_number = u32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());
-        offset += 4;
-        h.op_code = u16::from_le_bytes([buf[offset], buf[offset+1]]);
-        offset += 2;
-        h.flags = buf[offset] as u8;
-        offset += 1;
-        h.priority = buf[offset] as u8;
-        offset += 1;
-        h.sequence_id = u16::from_le_bytes([buf[offset], buf[offset+1]]);
-        offset += 2;
-        Ok(h)
+        let op_code = u16::from_le_bytes([buf[0], buf[1]]);
+        let flags = buf[2];
+        let priority = buf[3];
+        let sequence_id = u16::from_le_bytes([buf[4], buf[5]]);
+        Ok(Self { op_code, flags, priority, sequence_id })
     }
 }
 
-/// ObservabilityAccess — wire size: 46 bytes, magic: 0x88DE9D82
+/// Control — wire size: 9 bytes, opcode: 0x0001
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct ObservabilityAccess {
+pub struct Control {
     pub header: PacketHeader,
-    pub stage: u8,
     pub reason: u16,
-    pub access_level: u8,
-    pub access_key: [u8; 32],
+    pub type: u8,
 }
 
-impl ObservabilityAccess {
-    pub const FIXED_SIZE: usize = 46;
-    pub const MAGIC: u32 = 0x88DE9D82;
+impl Control {
+    pub const FIXED_SIZE: usize = 9;
+    pub const OPCODE: u16 = 0x0001;
 
     pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
         if buf.len() < Self::FIXED_SIZE { return Err(()); }
         let mut offset = 0;
-        buf[offset..offset+10].copy_from_slice(&self.header.serialize_to_bytes());
-        offset += 10;
-        buf[offset] = self.stage as u8;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset..offset+2].copy_from_slice(&(self.reason as u16).to_le_bytes());
+        offset += 2;
+        buf[offset] = self.type as u8;
+        offset += 1;
+        Ok(Self::FIXED_SIZE)
+    }
+
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut pkt = Self::default();
+        let mut offset = 0;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.reason = u16::from_le_bytes([buf[offset], buf[offset+1]]);
+        offset += 2;
+        pkt.type = buf[offset] as u8;
+        offset += 1;
+        Ok(pkt)
+    }
+}
+
+/// Directive — wire size: 21 bytes, opcode: 0x0008
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Directive {
+    pub header: PacketHeader,
+    pub type: u8,
+    pub reason: u16,
+    pub action: u8,
+    pub control: u8,
+    pub arg0: u32,
+    pub arg1: u32,
+    pub arg2: u16,
+}
+
+impl Directive {
+    pub const FIXED_SIZE: usize = 21;
+    pub const OPCODE: u16 = 0x0008;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut offset = 0;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset] = self.type as u8;
         offset += 1;
         buf[offset..offset+2].copy_from_slice(&(self.reason as u16).to_le_bytes());
         offset += 2;
-        buf[offset] = self.access_level as u8;
+        buf[offset] = self.action as u8;
         offset += 1;
-        buf[offset..offset+32].copy_from_slice(&self.access_key);
+        buf[offset] = self.control as u8;
+        offset += 1;
+        buf[offset..offset+4].copy_from_slice(&(self.arg0 as u32).to_le_bytes());
+        offset += 4;
+        buf[offset..offset+4].copy_from_slice(&(self.arg1 as u32).to_le_bytes());
+        offset += 4;
+        buf[offset..offset+2].copy_from_slice(&(self.arg2 as u16).to_le_bytes());
+        offset += 2;
+        Ok(Self::FIXED_SIZE)
+    }
+
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut pkt = Self::default();
+        let mut offset = 0;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.type = buf[offset] as u8;
+        offset += 1;
+        pkt.reason = u16::from_le_bytes([buf[offset], buf[offset+1]]);
+        offset += 2;
+        pkt.action = buf[offset] as u8;
+        offset += 1;
+        pkt.control = buf[offset] as u8;
+        offset += 1;
+        pkt.arg0 = u32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());
+        offset += 4;
+        pkt.arg1 = u32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());
+        offset += 4;
+        pkt.arg2 = u16::from_le_bytes([buf[offset], buf[offset+1]]);
+        offset += 2;
+        Ok(pkt)
+    }
+}
+
+/// ProofOfWorkChallenge — wire size: 79 bytes, opcode: 0x000A
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ProofOfWorkChallenge {
+    pub header: PacketHeader,
+    pub nonce: [u8; 32],
+    pub difficulty: u8,
+    pub timestamp_ticks: i64,
+    pub mac: [u8; 32],
+}
+
+impl ProofOfWorkChallenge {
+    pub const FIXED_SIZE: usize = 79;
+    pub const OPCODE: u16 = 0x000A;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut offset = 0;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset..offset+32].copy_from_slice(&self.nonce);
+        offset += 32;
+        buf[offset] = self.difficulty as u8;
+        offset += 1;
+        buf[offset..offset+8].copy_from_slice(&(self.timestamp_ticks as u64).to_le_bytes());
+        offset += 8;
+        buf[offset..offset+32].copy_from_slice(&self.mac);
         offset += 32;
         Ok(Self::FIXED_SIZE)
     }
@@ -88,80 +181,354 @@ impl ObservabilityAccess {
         if buf.len() < Self::FIXED_SIZE { return Err(()); }
         let mut pkt = Self::default();
         let mut offset = 0;
-        pkt.header = PacketHeader::deserialize(&buf[offset..offset+10]).map_err(|_| ())?;
-        offset += 10;
-        pkt.stage = buf[offset] as u8;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.nonce.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        pkt.difficulty = buf[offset] as u8;
         offset += 1;
-        pkt.reason = u16::from_le_bytes([buf[offset], buf[offset+1]]);
-        offset += 2;
-        pkt.access_level = buf[offset] as u8;
-        offset += 1;
-        pkt.access_key.copy_from_slice(&buf[offset..offset+32]);
+        pkt.timestamp_ticks = i64::from_le_bytes(buf[offset..offset+8].try_into().unwrap());
+        offset += 8;
+        pkt.mac.copy_from_slice(&buf[offset..offset+32]);
         offset += 32;
         Ok(pkt)
     }
-
-    pub fn equals(&self, other: &Self) -> bool {
-        let mut a = [0u8; Self::FIXED_SIZE];
-        let mut b = [0u8; Self::FIXED_SIZE];
-        let _ = self.serialize(&mut a);
-        let _ = other.serialize(&mut b);
-        a == b
-    }
 }
 
-/// RuntimeObservation — fixed: 18 bytes + variable, magic: 0x74AE4C55
-#[derive(Debug, Default, PartialEq)]
-pub struct RuntimeObservation {
+/// ProofOfWorkProof — wire size: 87 bytes, opcode: 0x000B
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ProofOfWorkProof {
     pub header: PacketHeader,
-    pub stage: u8,
-    pub target: u8,
-    pub reason: u16,
-    pub observation_data: u8,
+    pub nonce: [u8; 32],
+    pub difficulty: u8,
+    pub timestamp_ticks: i64,
+    pub mac: [u8; 32],
+    pub solution: i64,
 }
 
-impl RuntimeObservation {
-    pub const FIXED_SIZE: usize = 18;
-    pub const MAGIC: u32 = 0x74AE4C55;
+impl ProofOfWorkProof {
+    pub const FIXED_SIZE: usize = 87;
+    pub const OPCODE: u16 = 0x000B;
 
     pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
-        let required = 18
-            + self.observation_data.len()
-        ;
-        if buf.len() < required { return Err(()); }
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
         let mut offset = 0;
-        buf[offset..offset+10].copy_from_slice(&self.header.serialize_to_bytes());
-        offset += 10;
-        buf[offset] = self.stage as u8;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset..offset+32].copy_from_slice(&self.nonce);
+        offset += 32;
+        buf[offset] = self.difficulty as u8;
         offset += 1;
-        buf[offset] = self.target as u8;
-        offset += 1;
-        buf[offset..offset+2].copy_from_slice(&(self.reason as u16).to_le_bytes());
-        offset += 2;
-        buf[offset..offset+4].copy_from_slice(&(self.observation_data as u32).to_le_bytes());
-        offset += 4;
-        Ok(offset)
+        buf[offset..offset+8].copy_from_slice(&(self.timestamp_ticks as u64).to_le_bytes());
+        offset += 8;
+        buf[offset..offset+32].copy_from_slice(&self.mac);
+        offset += 32;
+        buf[offset..offset+8].copy_from_slice(&(self.solution as u64).to_le_bytes());
+        offset += 8;
+        Ok(Self::FIXED_SIZE)
     }
 
     pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
-        if buf.len() < 18 { return Err(()); }
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
         let mut pkt = Self::default();
         let mut offset = 0;
-        pkt.header = PacketHeader::deserialize(&buf[offset..offset+10]).map_err(|_| ())?;
-        offset += 10;
-        pkt.stage = buf[offset] as u8;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.nonce.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        pkt.difficulty = buf[offset] as u8;
         offset += 1;
-        pkt.target = buf[offset] as u8;
-        offset += 1;
-        pkt.reason = u16::from_le_bytes([buf[offset], buf[offset+1]]);
-        offset += 2;
-        pkt.observation_data = u8::from_le_bytes(buf[offset..offset+4].try_into().unwrap());
-        offset += 4;
+        pkt.timestamp_ticks = i64::from_le_bytes(buf[offset..offset+8].try_into().unwrap());
+        offset += 8;
+        pkt.mac.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        pkt.solution = i64::from_le_bytes(buf[offset..offset+8].try_into().unwrap());
+        offset += 8;
         Ok(pkt)
     }
+}
 
-    pub fn equals(&self, other: &Self) -> bool {
-        self == other
+/// SessionChallenge — wire size: 102 bytes, opcode: 0x0006
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SessionChallenge {
+    pub header: PacketHeader,
+    pub public_key: [u8; 32],
+    pub nonce: [u8; 32],
+    pub proof: [u8; 32],
+}
+
+impl SessionChallenge {
+    pub const FIXED_SIZE: usize = 102;
+    pub const OPCODE: u16 = 0x0006;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut offset = 0;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset..offset+32].copy_from_slice(&self.public_key);
+        offset += 32;
+        buf[offset..offset+32].copy_from_slice(&self.nonce);
+        offset += 32;
+        buf[offset..offset+32].copy_from_slice(&self.proof);
+        offset += 32;
+        Ok(Self::FIXED_SIZE)
+    }
+
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut pkt = Self::default();
+        let mut offset = 0;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.public_key.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        pkt.nonce.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        pkt.proof.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        Ok(pkt)
+    }
+}
+
+/// SessionEstablished — wire size: 46 bytes, opcode: 0x0007
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SessionEstablished {
+    pub header: PacketHeader,
+    pub proof: [u8; 32],
+    pub session_token: u64,
+}
+
+impl SessionEstablished {
+    pub const FIXED_SIZE: usize = 46;
+    pub const OPCODE: u16 = 0x0007;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut offset = 0;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset..offset+32].copy_from_slice(&self.proof);
+        offset += 32;
+        buf[offset..offset+8].copy_from_slice(&(self.session_token as u64).to_le_bytes());
+        offset += 8;
+        Ok(Self::FIXED_SIZE)
+    }
+
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut pkt = Self::default();
+        let mut offset = 0;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.proof.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        pkt.session_token = u64::from_le_bytes(buf[offset..offset+8].try_into().unwrap());
+        offset += 8;
+        Ok(pkt)
+    }
+}
+
+/// SessionInit — wire size: 70 bytes, opcode: 0x0000
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SessionInit {
+    pub header: PacketHeader,
+    pub public_key: [u8; 32],
+    pub nonce: [u8; 32],
+}
+
+impl SessionInit {
+    pub const FIXED_SIZE: usize = 70;
+    pub const OPCODE: u16 = 0x0000;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut offset = 0;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset..offset+32].copy_from_slice(&self.public_key);
+        offset += 32;
+        buf[offset..offset+32].copy_from_slice(&self.nonce);
+        offset += 32;
+        Ok(Self::FIXED_SIZE)
+    }
+
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut pkt = Self::default();
+        let mut offset = 0;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.public_key.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        pkt.nonce.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        Ok(pkt)
+    }
+}
+
+/// SessionProof — wire size: 38 bytes, opcode: 0x0003
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SessionProof {
+    pub header: PacketHeader,
+    pub proof: [u8; 32],
+}
+
+impl SessionProof {
+    pub const FIXED_SIZE: usize = 38;
+    pub const OPCODE: u16 = 0x0003;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut offset = 0;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset..offset+32].copy_from_slice(&self.proof);
+        offset += 32;
+        Ok(Self::FIXED_SIZE)
+    }
+
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut pkt = Self::default();
+        let mut offset = 0;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.proof.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        Ok(pkt)
+    }
+}
+
+/// SessionResume — wire size: 49 bytes, opcode: 0x0002
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SessionResume {
+    pub header: PacketHeader,
+    pub stage: u8,
+    pub session_token: u64,
+    pub reason: u16,
+    pub proof: [u8; 32],
+}
+
+impl SessionResume {
+    pub const FIXED_SIZE: usize = 49;
+    pub const OPCODE: u16 = 0x0002;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut offset = 0;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset] = self.stage as u8;
+        offset += 1;
+        buf[offset..offset+8].copy_from_slice(&(self.session_token as u64).to_le_bytes());
+        offset += 8;
+        buf[offset..offset+2].copy_from_slice(&(self.reason as u16).to_le_bytes());
+        offset += 2;
+        buf[offset..offset+32].copy_from_slice(&self.proof);
+        offset += 32;
+        Ok(Self::FIXED_SIZE)
+    }
+
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut pkt = Self::default();
+        let mut offset = 0;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.stage = buf[offset] as u8;
+        offset += 1;
+        pkt.session_token = u64::from_le_bytes(buf[offset..offset+8].try_into().unwrap());
+        offset += 8;
+        pkt.reason = u16::from_le_bytes([buf[offset], buf[offset+1]]);
+        offset += 2;
+        pkt.proof.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        Ok(pkt)
+    }
+}
+
+/// SessionTofu — wire size: 38 bytes, opcode: 0x0005
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SessionTofu {
+    pub header: PacketHeader,
+    pub public_key: [u8; 32],
+}
+
+impl SessionTofu {
+    pub const FIXED_SIZE: usize = 38;
+    pub const OPCODE: u16 = 0x0005;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut offset = 0;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset..offset+32].copy_from_slice(&self.public_key);
+        offset += 32;
+        Ok(Self::FIXED_SIZE)
+    }
+
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut pkt = Self::default();
+        let mut offset = 0;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.public_key.copy_from_slice(&buf[offset..offset+32]);
+        offset += 32;
+        Ok(pkt)
+    }
+}
+
+/// TimeSync — wire size: 23 bytes, opcode: 0x0004
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TimeSync {
+    pub header: PacketHeader,
+    pub type: u8,
+    pub timestamp: i64,
+    pub mono_ticks: i64,
+}
+
+impl TimeSync {
+    pub const FIXED_SIZE: usize = 23;
+    pub const OPCODE: u16 = 0x0004;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut offset = 0;
+        buf[offset..offset+6].copy_from_slice(&self.header.serialize_to_bytes());
+        offset += 6;
+        buf[offset] = self.type as u8;
+        offset += 1;
+        buf[offset..offset+8].copy_from_slice(&(self.timestamp as u64).to_le_bytes());
+        offset += 8;
+        buf[offset..offset+8].copy_from_slice(&(self.mono_ticks as u64).to_le_bytes());
+        offset += 8;
+        Ok(Self::FIXED_SIZE)
+    }
+
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> {
+        if buf.len() < Self::FIXED_SIZE { return Err(()); }
+        let mut pkt = Self::default();
+        let mut offset = 0;
+        pkt.header = PacketHeader::deserialize(&buf[offset..offset+6]).map_err(|_| ())?;
+        offset += 6;
+        pkt.type = buf[offset] as u8;
+        offset += 1;
+        pkt.timestamp = i64::from_le_bytes(buf[offset..offset+8].try_into().unwrap());
+        offset += 8;
+        pkt.mono_ticks = i64::from_le_bytes(buf[offset..offset+8].try_into().unwrap());
+        offset += 8;
+        Ok(pkt)
     }
 }
 

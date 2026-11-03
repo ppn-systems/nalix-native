@@ -6,7 +6,7 @@ namespace Nalix.Protogen.Abstractions;
 public sealed record PacketDefinition(
     string Name,
     string FullName,
-    uint Magic,
+    ushort OpCode,
     IReadOnlyList<PacketField> Fields,
     bool IsFixedSize,
     int FixedSize);

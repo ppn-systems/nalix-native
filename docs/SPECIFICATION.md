@@ -29,7 +29,7 @@ To guarantee byte-level wire compatibility across platforms, C# types are mapped
 | C# Type | C Type | Rust Type | Size (Bytes) | Wire Layout |
 | :--- | :--- | :--- | :--- | :--- |
 | `Bytes32` | `Bytes32` | `[u8; 32]` | 32 | Raw byte array (`uint8_t[32]`) |
-| `PacketHeader` | `PacketHeader` | `PacketHeader` | 10 | Packed explicit struct layout |
+| `PacketHeader` | `PacketHeader` | `PacketHeader` | 6 | Packed explicit struct layout (OpCode: 2, Flags: 1, Priority: 1, SequenceId: 2) |
 | `string` | `NalixString` | `Vec<u8>` | Variable | `[int32_t length][utf8_bytes]` |
 
 #### String Wire Format

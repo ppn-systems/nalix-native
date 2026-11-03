@@ -6,55 +6,241 @@
 #include <string.h>
 #include <assert.h>
 
-static void test_observabilityaccess_round_trip(void)
+static void test_control_round_trip(void)
 {
-    ObservabilityAccess pkt;
-    memset(&pkt, 0, sizeof(pkt));
-    memset(&pkt.Header, 0, sizeof(PacketHeader));
-    pkt.Stage = 0x02;
-    pkt.Reason = 0x0066;
-    pkt.AccessLevel = 0x04;
-    { Bytes32 tmp = {{ 0x05 }}; pkt.AccessKey = tmp; }
+    Control pkt;
+    control_init(&pkt);
+    pkt.Reason = 0x0064;
+    pkt.Type = 0x02;
 
-    uint8_t buf[OBSERVABILITYACCESS_SIZE];
-    size_t written = observabilityaccess_serialize(&pkt, buf, sizeof(buf));
-    assert(written == 46);
+    uint8_t buf[CONTROL_SIZE];
+    size_t written = control_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 9);
 
-    ObservabilityAccess parsed;
+    Control parsed;
     memset(&parsed, 0, sizeof(parsed));
-    size_t rd = observabilityaccess_deserialize(&parsed, buf, sizeof(buf));
-    assert(rd == 46);
-    assert(observabilityaccess_equals(&pkt, &parsed));
-    printf("  [PASS] ObservabilityAccess round-trip\n");
+    size_t rd = control_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 9);
+    assert(control_equals(&pkt, &parsed));
+    printf("  [PASS] Control round-trip\n");
 }
 
-static void test_runtimeobservation_round_trip(void)
+static void test_directive_round_trip(void)
 {
-    RuntimeObservation pkt;
-    memset(&pkt, 0, sizeof(pkt));
-    memset(&pkt.Header, 0, sizeof(PacketHeader));
-    pkt.Stage = 0x02;
-    pkt.Target = 0x03;
-    pkt.Reason = 0x0067;
-    { NalixString tmp = { 0, NULL }; pkt.ObservationData = tmp; }
+    Directive pkt;
+    directive_init(&pkt);
+    pkt.Type = 0x01;
+    pkt.Reason = 0x0065;
+    pkt.Action = 0x03;
+    pkt.Control = 0x04;
+    pkt.Arg0 = 0x000003EC;
+    pkt.Arg1 = 0x000003ED;
+    pkt.Arg2 = 0x006A;
 
-    uint8_t buf[RUNTIMEOBSERVATION_SIZE];
-    size_t written = runtimeobservation_serialize(&pkt, buf, sizeof(buf));
-    assert(written == 18);
+    uint8_t buf[DIRECTIVE_SIZE];
+    size_t written = directive_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 21);
 
-    RuntimeObservation parsed;
+    Directive parsed;
     memset(&parsed, 0, sizeof(parsed));
-    size_t rd = runtimeobservation_deserialize(&parsed, buf, sizeof(buf));
-    assert(rd == 18);
-    assert(runtimeobservation_equals(&pkt, &parsed));
-    printf("  [PASS] RuntimeObservation round-trip\n");
+    size_t rd = directive_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 21);
+    assert(directive_equals(&pkt, &parsed));
+    printf("  [PASS] Directive round-trip\n");
+}
+
+static void test_proofofworkchallenge_round_trip(void)
+{
+    ProofOfWorkChallenge pkt;
+    proofofworkchallenge_init(&pkt);
+    { Bytes32 tmp = {{ 0x01 }}; pkt.Nonce = tmp; }
+    pkt.Difficulty = 0x02;
+    pkt.TimestampTicks = 0x0000000000002712ULL;
+    { Bytes32 tmp = {{ 0x04 }}; pkt.Mac = tmp; }
+
+    uint8_t buf[PROOFOFWORKCHALLENGE_SIZE];
+    size_t written = proofofworkchallenge_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 79);
+
+    ProofOfWorkChallenge parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    size_t rd = proofofworkchallenge_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 79);
+    assert(proofofworkchallenge_equals(&pkt, &parsed));
+    printf("  [PASS] ProofOfWorkChallenge round-trip\n");
+}
+
+static void test_proofofworkproof_round_trip(void)
+{
+    ProofOfWorkProof pkt;
+    proofofworkproof_init(&pkt);
+    { Bytes32 tmp = {{ 0x01 }}; pkt.Nonce = tmp; }
+    pkt.Difficulty = 0x02;
+    pkt.TimestampTicks = 0x0000000000002712ULL;
+    { Bytes32 tmp = {{ 0x04 }}; pkt.Mac = tmp; }
+    pkt.Solution = 0x0000000000002714ULL;
+
+    uint8_t buf[PROOFOFWORKPROOF_SIZE];
+    size_t written = proofofworkproof_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 87);
+
+    ProofOfWorkProof parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    size_t rd = proofofworkproof_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 87);
+    assert(proofofworkproof_equals(&pkt, &parsed));
+    printf("  [PASS] ProofOfWorkProof round-trip\n");
+}
+
+static void test_sessionchallenge_round_trip(void)
+{
+    SessionChallenge pkt;
+    sessionchallenge_init(&pkt);
+    { Bytes32 tmp = {{ 0x01 }}; pkt.PublicKey = tmp; }
+    { Bytes32 tmp = {{ 0x02 }}; pkt.Nonce = tmp; }
+    { Bytes32 tmp = {{ 0x03 }}; pkt.Proof = tmp; }
+
+    uint8_t buf[SESSIONCHALLENGE_SIZE];
+    size_t written = sessionchallenge_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 102);
+
+    SessionChallenge parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    size_t rd = sessionchallenge_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 102);
+    assert(sessionchallenge_equals(&pkt, &parsed));
+    printf("  [PASS] SessionChallenge round-trip\n");
+}
+
+static void test_sessionestablished_round_trip(void)
+{
+    SessionEstablished pkt;
+    sessionestablished_init(&pkt);
+    { Bytes32 tmp = {{ 0x01 }}; pkt.Proof = tmp; }
+    pkt.SessionToken = 0x0000000000002711ULL;
+
+    uint8_t buf[SESSIONESTABLISHED_SIZE];
+    size_t written = sessionestablished_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 46);
+
+    SessionEstablished parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    size_t rd = sessionestablished_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 46);
+    assert(sessionestablished_equals(&pkt, &parsed));
+    printf("  [PASS] SessionEstablished round-trip\n");
+}
+
+static void test_sessioninit_round_trip(void)
+{
+    SessionInit pkt;
+    sessioninit_init(&pkt);
+    { Bytes32 tmp = {{ 0x01 }}; pkt.PublicKey = tmp; }
+    { Bytes32 tmp = {{ 0x02 }}; pkt.Nonce = tmp; }
+
+    uint8_t buf[SESSIONINIT_SIZE];
+    size_t written = sessioninit_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 70);
+
+    SessionInit parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    size_t rd = sessioninit_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 70);
+    assert(sessioninit_equals(&pkt, &parsed));
+    printf("  [PASS] SessionInit round-trip\n");
+}
+
+static void test_sessionproof_round_trip(void)
+{
+    SessionProof pkt;
+    sessionproof_init(&pkt);
+    { Bytes32 tmp = {{ 0x01 }}; pkt.Proof = tmp; }
+
+    uint8_t buf[SESSIONPROOF_SIZE];
+    size_t written = sessionproof_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 38);
+
+    SessionProof parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    size_t rd = sessionproof_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 38);
+    assert(sessionproof_equals(&pkt, &parsed));
+    printf("  [PASS] SessionProof round-trip\n");
+}
+
+static void test_sessionresume_round_trip(void)
+{
+    SessionResume pkt;
+    sessionresume_init(&pkt);
+    pkt.Stage = 0x01;
+    pkt.SessionToken = 0x0000000000002711ULL;
+    pkt.Reason = 0x0066;
+    { Bytes32 tmp = {{ 0x04 }}; pkt.Proof = tmp; }
+
+    uint8_t buf[SESSIONRESUME_SIZE];
+    size_t written = sessionresume_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 49);
+
+    SessionResume parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    size_t rd = sessionresume_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 49);
+    assert(sessionresume_equals(&pkt, &parsed));
+    printf("  [PASS] SessionResume round-trip\n");
+}
+
+static void test_sessiontofu_round_trip(void)
+{
+    SessionTofu pkt;
+    sessiontofu_init(&pkt);
+    { Bytes32 tmp = {{ 0x01 }}; pkt.PublicKey = tmp; }
+
+    uint8_t buf[SESSIONTOFU_SIZE];
+    size_t written = sessiontofu_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 38);
+
+    SessionTofu parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    size_t rd = sessiontofu_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 38);
+    assert(sessiontofu_equals(&pkt, &parsed));
+    printf("  [PASS] SessionTofu round-trip\n");
+}
+
+static void test_timesync_round_trip(void)
+{
+    TimeSync pkt;
+    timesync_init(&pkt);
+    pkt.Type = 0x01;
+    pkt.Timestamp = 0x0000000000002711ULL;
+    pkt.MonoTicks = 0x0000000000002712ULL;
+
+    uint8_t buf[TIMESYNC_SIZE];
+    size_t written = timesync_serialize(&pkt, buf, sizeof(buf));
+    assert(written == 23);
+
+    TimeSync parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    size_t rd = timesync_deserialize(&parsed, buf, sizeof(buf));
+    assert(rd == 23);
+    assert(timesync_equals(&pkt, &parsed));
+    printf("  [PASS] TimeSync round-trip\n");
 }
 
 int main(void)
 {
     printf("Nalix Protocol Round-trip Tests\n\n");
-    test_observabilityaccess_round_trip();
-    test_runtimeobservation_round_trip();
+    test_control_round_trip();
+    test_directive_round_trip();
+    test_proofofworkchallenge_round_trip();
+    test_proofofworkproof_round_trip();
+    test_sessionchallenge_round_trip();
+    test_sessionestablished_round_trip();
+    test_sessioninit_round_trip();
+    test_sessionproof_round_trip();
+    test_sessionresume_round_trip();
+    test_sessiontofu_round_trip();
+    test_timesync_round_trip();
     printf("\nAll tests passed!\n");
     return 0;
 }
