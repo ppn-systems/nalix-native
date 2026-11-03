@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<OutputType>Exe</OutputType>
+		<AssemblyName>nxproto</AssemblyName>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<RootNamespace>NXProto.Cli</RootNamespace>
+		<NoWarn>$(NoWarn);CA1303;CA1848</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\NXProto.Core\NXProto.Core.csproj" />
+		<ProjectReference Include="..\NXProto.Engine\NXProto.Engine.csproj" />
+	</ItemGroup>
+
+</Project>

@@ -1,0 +1,53 @@
+name: CI TypeScript / Web Client
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'clients/ts/**'
+      - 'examples/ts/**'
+      - '.github/workflows/ci-client-ts.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'clients/ts/**'
+      - 'examples/ts/**'
+      - '.github/workflows/ci-client-ts.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-client-ts-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test-ts:
+    name: Build & Verify TypeScript Client (Node.js)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install Dependencies
+      run: npm ci
+      working-directory: clients/ts
+
+    - name: Build and Run Tests
+      run: npm test
+      working-directory: clients/ts
+
+    - name: Install Example Dependencies
+      run: npm ci
+      working-directory: examples/ts
+
+    - name: Build and Run Example Codec Tests
+      run: npm test
+      working-directory: examples/ts

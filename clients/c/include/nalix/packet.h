@@ -5,12 +5,23 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "nalix/status.h"
+#include "nalix/protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define NALIX_HEADER_SIZE 6
+
+/**
+ * @brief Nalix Wire Protocol Packet Flags.
+ */
+typedef enum nalix_packet_flags {
+    NALIX_PACKET_FLAG_NONE       = 0x00,
+    NALIX_PACKET_FLAG_COMPRESSED = 0x02,
+    NALIX_PACKET_FLAG_ENCRYPTED  = 0x04,
+    NALIX_PACKET_FLAG_FRAGMENTED = 0x08
+} nalix_packet_flags_t;
 
 #if defined(__GNUC__) || defined(__clang__)
 #define NALIX_PACKED __attribute__((packed))
@@ -45,13 +56,25 @@ typedef struct nalix_packet {
 } nalix_packet_t;
 
 /**
+ * @brief High-level helper to initialize a packet with opcode and payload.
+ */
+static inline nalix_packet_t nalix_packet_create(
+    uint16_t opcode,
+    const uint8_t* payload,
+    size_t payload_len
+) {
+    nalix_packet_t pkt;
+    pkt.header.opcode = opcode;
+    pkt.header.flags = NALIX_PACKET_FLAG_NONE;
+    pkt.header.priority = 0;
+    pkt.header.sequence_id = 0;
+    pkt.payload = payload;
+    pkt.payload_len = payload_len;
+    return pkt;
+}
+
+/**
  * @brief Encodes a packet into a destination buffer.
- *
- * @param packet Pointer to the packet structure.
- * @param buffer Destination buffer.
- * @param buffer_capacity Capacity of destination buffer in bytes.
- * @param bytes_written Output parameter receiving total bytes encoded.
- * @return nalix_status_t Status of encoding.
  */
 nalix_status_t nalix_packet_encode(
     const nalix_packet_t* packet,
@@ -62,12 +85,6 @@ nalix_status_t nalix_packet_encode(
 
 /**
  * @brief Decodes a packet from a binary wire buffer.
- *
- * @param buffer Pointer to source buffer.
- * @param buffer_len Total bytes available in source buffer.
- * @param packet Output packet receiving decoded header and payload reference.
- * @param bytes_consumed Output parameter receiving total bytes parsed.
- * @return nalix_status_t Status of decoding.
  */
 nalix_status_t nalix_packet_decode(
     const uint8_t* buffer,

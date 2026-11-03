@@ -2,6 +2,8 @@
 bin/
 obj/
 target/
+dist/
+node_modules/
 
 ## IDE / VS
 .vs/

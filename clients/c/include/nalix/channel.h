@@ -31,6 +31,8 @@ typedef struct nalix_channel_config {
     uint32_t keepalive_interval_ms;
     size_t max_receive_message_length;
     size_t max_send_message_length;
+    bool allow_tofu;
+    const uint8_t* server_public_key; /* 32 bytes pinned key, or NULL */
 } nalix_channel_config_t;
 
 /**

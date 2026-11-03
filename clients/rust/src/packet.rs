@@ -75,6 +75,27 @@ impl Packet {
         Self { header, payload }
     }
 
+    /// High-level constructor from opcode and payload.
+    pub fn create(opcode: u16, payload: impl Into<Vec<u8>>) -> Self {
+        Self {
+            header: PacketHeader::new(opcode, 0, 0, 0),
+            payload: payload.into(),
+        }
+    }
+
+    /// High-level constructor from opcode, sequence ID, and payload.
+    pub fn with_sequence(opcode: u16, sequence_id: u16, payload: impl Into<Vec<u8>>) -> Self {
+        Self {
+            header: PacketHeader::new(opcode, 0, 0, sequence_id),
+            payload: payload.into(),
+        }
+    }
+
+    /// Helper to read payload as a UTF-8 string slice.
+    pub fn as_str(&self) -> Result<&str, std::str::Utf8Error> {
+        std::str::from_utf8(&self.payload)
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut buf = vec![0u8; NALIX_HEADER_SIZE + self.payload.len()];
         self.header.encode(&mut buf[..NALIX_HEADER_SIZE]).unwrap();
