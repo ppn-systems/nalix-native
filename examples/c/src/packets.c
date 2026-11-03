@@ -130,7 +130,7 @@ size_t proofofworkchallenge_serialize(const ProofOfWorkChallenge* pkt, uint8_t* 
     uint8_t* ptr = buf;
 
     memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(ptr, pkt->Nonce.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->Nonce, 32); ptr += 32;
     ptr[0] = (uint8_t)pkt->Difficulty; ptr += 1;
     ptr[0] = (uint8_t)(pkt->TimestampTicks);
     ptr[1] = (uint8_t)((pkt->TimestampTicks) >> 8);
@@ -140,7 +140,7 @@ size_t proofofworkchallenge_serialize(const ProofOfWorkChallenge* pkt, uint8_t* 
     ptr[5] = (uint8_t)((pkt->TimestampTicks) >> 40);
     ptr[6] = (uint8_t)((pkt->TimestampTicks) >> 48);
     ptr[7] = (uint8_t)((pkt->TimestampTicks) >> 56); ptr += 8;
-    memcpy(ptr, pkt->Mac.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->Mac, 32); ptr += 32;
     return 79;
 }
 
@@ -150,10 +150,10 @@ size_t proofofworkchallenge_deserialize(ProofOfWorkChallenge* pkt, const uint8_t
     const uint8_t* ptr = buf;
 
     memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(pkt->Nonce.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->Nonce, ptr, 32); ptr += 32;
     pkt->Difficulty = (uint8_t)ptr[0]; ptr += 1;
     pkt->TimestampTicks = (int64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
-    memcpy(pkt->Mac.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->Mac, ptr, 32); ptr += 32;
     return 79;
 }
 
@@ -176,7 +176,7 @@ size_t proofofworkproof_serialize(const ProofOfWorkProof* pkt, uint8_t* buf, siz
     uint8_t* ptr = buf;
 
     memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(ptr, pkt->Nonce.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->Nonce, 32); ptr += 32;
     ptr[0] = (uint8_t)pkt->Difficulty; ptr += 1;
     ptr[0] = (uint8_t)(pkt->TimestampTicks);
     ptr[1] = (uint8_t)((pkt->TimestampTicks) >> 8);
@@ -186,7 +186,7 @@ size_t proofofworkproof_serialize(const ProofOfWorkProof* pkt, uint8_t* buf, siz
     ptr[5] = (uint8_t)((pkt->TimestampTicks) >> 40);
     ptr[6] = (uint8_t)((pkt->TimestampTicks) >> 48);
     ptr[7] = (uint8_t)((pkt->TimestampTicks) >> 56); ptr += 8;
-    memcpy(ptr, pkt->Mac.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->Mac, 32); ptr += 32;
     ptr[0] = (uint8_t)(pkt->Solution);
     ptr[1] = (uint8_t)((pkt->Solution) >> 8);
     ptr[2] = (uint8_t)((pkt->Solution) >> 16);
@@ -204,10 +204,10 @@ size_t proofofworkproof_deserialize(ProofOfWorkProof* pkt, const uint8_t* buf, s
     const uint8_t* ptr = buf;
 
     memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(pkt->Nonce.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->Nonce, ptr, 32); ptr += 32;
     pkt->Difficulty = (uint8_t)ptr[0]; ptr += 1;
     pkt->TimestampTicks = (int64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
-    memcpy(pkt->Mac.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->Mac, ptr, 32); ptr += 32;
     pkt->Solution = (int64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
     return 87;
 }
@@ -231,9 +231,9 @@ size_t sessionchallenge_serialize(const SessionChallenge* pkt, uint8_t* buf, siz
     uint8_t* ptr = buf;
 
     memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(ptr, pkt->PublicKey.data, 32); ptr += 32;
-    memcpy(ptr, pkt->Nonce.data, 32); ptr += 32;
-    memcpy(ptr, pkt->Proof.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->PublicKey, 32); ptr += 32;
+    memcpy(ptr, &pkt->Nonce, 32); ptr += 32;
+    memcpy(ptr, &pkt->Proof, 32); ptr += 32;
     return 102;
 }
 
@@ -243,9 +243,9 @@ size_t sessionchallenge_deserialize(SessionChallenge* pkt, const uint8_t* buf, s
     const uint8_t* ptr = buf;
 
     memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(pkt->PublicKey.data, ptr, 32); ptr += 32;
-    memcpy(pkt->Nonce.data, ptr, 32); ptr += 32;
-    memcpy(pkt->Proof.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->PublicKey, ptr, 32); ptr += 32;
+    memcpy(&pkt->Nonce, ptr, 32); ptr += 32;
+    memcpy(&pkt->Proof, ptr, 32); ptr += 32;
     return 102;
 }
 
@@ -268,7 +268,7 @@ size_t sessionestablished_serialize(const SessionEstablished* pkt, uint8_t* buf,
     uint8_t* ptr = buf;
 
     memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(ptr, pkt->Proof.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->Proof, 32); ptr += 32;
     ptr[0] = (uint8_t)(pkt->SessionToken);
     ptr[1] = (uint8_t)((pkt->SessionToken) >> 8);
     ptr[2] = (uint8_t)((pkt->SessionToken) >> 16);
@@ -286,7 +286,7 @@ size_t sessionestablished_deserialize(SessionEstablished* pkt, const uint8_t* bu
     const uint8_t* ptr = buf;
 
     memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(pkt->Proof.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->Proof, ptr, 32); ptr += 32;
     pkt->SessionToken = (uint64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
     return 46;
 }
@@ -310,8 +310,8 @@ size_t sessioninit_serialize(const SessionInit* pkt, uint8_t* buf, size_t buf_si
     uint8_t* ptr = buf;
 
     memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(ptr, pkt->PublicKey.data, 32); ptr += 32;
-    memcpy(ptr, pkt->Nonce.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->PublicKey, 32); ptr += 32;
+    memcpy(ptr, &pkt->Nonce, 32); ptr += 32;
     return 70;
 }
 
@@ -321,8 +321,8 @@ size_t sessioninit_deserialize(SessionInit* pkt, const uint8_t* buf, size_t buf_
     const uint8_t* ptr = buf;
 
     memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(pkt->PublicKey.data, ptr, 32); ptr += 32;
-    memcpy(pkt->Nonce.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->PublicKey, ptr, 32); ptr += 32;
+    memcpy(&pkt->Nonce, ptr, 32); ptr += 32;
     return 70;
 }
 
@@ -345,7 +345,7 @@ size_t sessionproof_serialize(const SessionProof* pkt, uint8_t* buf, size_t buf_
     uint8_t* ptr = buf;
 
     memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(ptr, pkt->Proof.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->Proof, 32); ptr += 32;
     return 38;
 }
 
@@ -355,7 +355,7 @@ size_t sessionproof_deserialize(SessionProof* pkt, const uint8_t* buf, size_t bu
     const uint8_t* ptr = buf;
 
     memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(pkt->Proof.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->Proof, ptr, 32); ptr += 32;
     return 38;
 }
 
@@ -389,7 +389,7 @@ size_t sessionresume_serialize(const SessionResume* pkt, uint8_t* buf, size_t bu
     ptr[7] = (uint8_t)((pkt->SessionToken) >> 56); ptr += 8;
     ptr[0] = (uint8_t)(pkt->Reason);
     ptr[1] = (uint8_t)((pkt->Reason) >> 8); ptr += 2;
-    memcpy(ptr, pkt->Proof.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->Proof, 32); ptr += 32;
     return 49;
 }
 
@@ -402,7 +402,7 @@ size_t sessionresume_deserialize(SessionResume* pkt, const uint8_t* buf, size_t 
     pkt->Stage = (uint8_t)ptr[0]; ptr += 1;
     pkt->SessionToken = (uint64_t)((uint64_t)ptr[0] | ((uint64_t)ptr[1] << 8) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[4] << 32) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[7] << 56)); ptr += 8;
     pkt->Reason = (uint16_t)((uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8)); ptr += 2;
-    memcpy(pkt->Proof.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->Proof, ptr, 32); ptr += 32;
     return 49;
 }
 
@@ -425,7 +425,7 @@ size_t sessiontofu_serialize(const SessionTofu* pkt, uint8_t* buf, size_t buf_si
     uint8_t* ptr = buf;
 
     memcpy(ptr, &pkt->Header, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(ptr, pkt->PublicKey.data, 32); ptr += 32;
+    memcpy(ptr, &pkt->PublicKey, 32); ptr += 32;
     return 38;
 }
 
@@ -435,7 +435,7 @@ size_t sessiontofu_deserialize(SessionTofu* pkt, const uint8_t* buf, size_t buf_
     const uint8_t* ptr = buf;
 
     memcpy(&pkt->Header, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;
-    memcpy(pkt->PublicKey.data, ptr, 32); ptr += 32;
+    memcpy(&pkt->PublicKey, ptr, 32); ptr += 32;
     return 38;
 }
 

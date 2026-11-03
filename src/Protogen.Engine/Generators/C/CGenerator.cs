@@ -49,7 +49,19 @@ public sealed class CGenerator : ICodeGenerator
         _ = sb.AppendLine("#include <string.h>");
         _ = sb.AppendLine();
 
+        _ = sb.AppendLine("typedef struct { uint8_t data[16]; } Bytes16;");
         _ = sb.AppendLine("typedef struct { uint8_t data[32]; } Bytes32;");
+        _ = sb.AppendLine("typedef struct { uint8_t data[64]; } Bytes64;");
+        _ = sb.AppendLine("typedef struct { uint8_t data[16]; } Guid;");
+        _ = sb.AppendLine("typedef struct { uint8_t data[16]; } Decimal;");
+        _ = sb.AppendLine("typedef struct { int64_t date_time; int16_t offset_minutes; } DateTimeOffset;");
+        _ = sb.AppendLine("#if defined(__GNUC__) || defined(__clang__)");
+        _ = sb.AppendLine("    typedef __int128_t int128_t;");
+        _ = sb.AppendLine("    typedef __uint128_t uint128_t;");
+        _ = sb.AppendLine("#else");
+        _ = sb.AppendLine("    typedef struct { uint8_t data[16]; } int128_t;");
+        _ = sb.AppendLine("    typedef struct { uint8_t data[16]; } uint128_t;");
+        _ = sb.AppendLine("#endif");
         _ = sb.AppendLine();
         _ = sb.AppendLine("// Length-prefixed UTF-8 string (matches Nalix codec wire format)");
         _ = sb.AppendLine("// null = length -1, empty = length 0, otherwise [int32_t length][utf8 bytes]");
@@ -315,9 +327,9 @@ public sealed class CGenerator : ICodeGenerator
         {
             AppendInvariant(sb, $"    {indent}memcpy(ptr, &pkt->{name}, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;");
         }
-        else if (cs == ProtocolConstants.Bytes32FullName)
+        else if (cs == ProtocolConstants.Bytes32FullName || field.CType is "Bytes32" or "Bytes16" or "Bytes64" or "Guid" or "Decimal" or "DateTimeOffset" or "int128_t" or "uint128_t" || size > 8)
         {
-            AppendInvariant(sb, $"    {indent}memcpy(ptr, pkt->{name}.data, 32); ptr += 32;");
+            AppendInvariant(sb, $"    {indent}memcpy(ptr, &pkt->{name}, {size}); ptr += {size};");
         }
         else if (field.CType == ProtocolConstants.StringCType)
         {
@@ -387,9 +399,9 @@ public sealed class CGenerator : ICodeGenerator
         {
             AppendInvariant(sb, $"    {indent}memcpy(&pkt->{name}, ptr, PACKET_HEADER_SIZE); ptr += PACKET_HEADER_SIZE;");
         }
-        else if (cs == ProtocolConstants.Bytes32FullName)
+        else if (cs == ProtocolConstants.Bytes32FullName || field.CType is "Bytes32" or "Bytes16" or "Bytes64" or "Guid" or "Decimal" or "DateTimeOffset" or "int128_t" or "uint128_t" || size > 8)
         {
-            AppendInvariant(sb, $"    {indent}memcpy(pkt->{name}.data, ptr, 32); ptr += 32;");
+            AppendInvariant(sb, $"    {indent}memcpy(&pkt->{name}, ptr, {size}); ptr += {size};");
         }
         else if (field.CType == ProtocolConstants.StringCType)
         {
@@ -569,7 +581,7 @@ public sealed class CGenerator : ICodeGenerator
             return "{0}";
         }
 
-        if (cs == ProtocolConstants.Bytes32FullName)
+        if (cs == ProtocolConstants.Bytes32FullName || field.CType is "Bytes16" or "Bytes32" or "Bytes64" or "Guid" or "Decimal" or "DateTimeOffset" or "int128_t" or "uint128_t" || size > 8)
         {
             return $"{{{{ 0x{index + 1:X2} }}}}";
         }

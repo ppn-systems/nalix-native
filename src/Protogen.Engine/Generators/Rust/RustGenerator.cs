@@ -256,12 +256,17 @@ public sealed class RustGenerator : ICodeGenerator
             AppendInvariant(sb, $"{indent}buf[offset..offset+{size}].copy_from_slice(&{valDeref}.serialize_to_bytes());");
             AppendInvariant(sb, $"{indent}offset += {size};");
         }
-        else if (cs == ProtocolConstants.Bytes32FullName)
+        else if (field.RustType is "u128" or "i128")
         {
-            AppendInvariant(sb, $"{indent}buf[offset..offset+32].copy_from_slice({valRef});");
-            AppendInvariant(sb, $"{indent}offset += 32;");
+            AppendInvariant(sb, $"{indent}buf[offset..offset+16].copy_from_slice(&{valDeref}.to_le_bytes());");
+            AppendInvariant(sb, $"{indent}offset += 16;");
         }
-        else if (cs == "string" || cs == "System.String")
+        else if (cs == ProtocolConstants.Bytes32FullName || field.RustType.StartsWith("[u8; ", StringComparison.Ordinal) || size > 8)
+        {
+            AppendInvariant(sb, $"{indent}buf[offset..offset+{size}].copy_from_slice({valRef});");
+            AppendInvariant(sb, $"{indent}offset += {size};");
+        }
+        else if (cs == "string" || cs == "System.String" || field.RustType == "Vec<u8>")
         {
             AppendInvariant(sb, $"{indent}let slen = {valDeref}.len() as i32;");
             AppendInvariant(sb, $"{indent}buf[offset..offset+4].copy_from_slice(&slen.to_le_bytes());");
@@ -321,20 +326,25 @@ public sealed class RustGenerator : ICodeGenerator
             AppendInvariant(sb, $"{indent}{target} = PacketHeader::deserialize(&buf[offset..offset+{size}]).map_err(|_| ())?;");
             AppendInvariant(sb, $"{indent}offset += {size};");
         }
-        else if (cs == ProtocolConstants.Bytes32FullName)
+        else if (field.RustType is "u128" or "i128")
+        {
+            AppendInvariant(sb, $"{indent}{target} = {field.RustType}::from_le_bytes(buf[offset..offset+16].try_into().unwrap());");
+            AppendInvariant(sb, $"{indent}offset += 16;");
+        }
+        else if (cs == ProtocolConstants.Bytes32FullName || field.RustType.StartsWith("[u8; ", StringComparison.Ordinal) || size > 8)
         {
             if (field.IsNullable)
             {
-                AppendInvariant(sb, $"{indent}let mut val = [0u8; 32];");
-                AppendInvariant(sb, $"{indent}val.copy_from_slice(&buf[offset..offset+32]);");
+                AppendInvariant(sb, $"{indent}let mut val = [0u8; {size}];");
+                AppendInvariant(sb, $"{indent}val.copy_from_slice(&buf[offset..offset+{size}]);");
             }
             else
             {
-                AppendInvariant(sb, $"{indent}{target}.copy_from_slice(&buf[offset..offset+32]);");
+                AppendInvariant(sb, $"{indent}{target}.copy_from_slice(&buf[offset..offset+{size}]);");
             }
-            AppendInvariant(sb, $"{indent}offset += 32;");
+            AppendInvariant(sb, $"{indent}offset += {size};");
         }
-        else if (cs == "string" || cs == "System.String")
+        else if (cs == "string" || cs == "System.String" || field.RustType == "Vec<u8>")
         {
             AppendInvariant(sb, $"{indent}let slen = i32::from_le_bytes(buf[offset..offset+4].try_into().unwrap());");
             AppendInvariant(sb, $"{indent}offset += 4;");
@@ -461,9 +471,13 @@ public sealed class RustGenerator : ICodeGenerator
         {
             val = "vec![]";
         }
-        else if (rustType == "[u8; 32]")
+        else if (rustType.StartsWith("[u8; ", StringComparison.Ordinal))
         {
-            val = FormattableString.Invariant($"[0x{index + 1:X2}u8; 32]");
+            val = FormattableString.Invariant($"[0x{index + 1:X2}u8; {field.Size}]");
+        }
+        else if (rustType is "u128" or "i128")
+        {
+            val = FormattableString.Invariant($"0x{index + 100000:X}{rustType}");
         }
         else if (rustType == ProtocolConstants.PacketHeaderName)
         {

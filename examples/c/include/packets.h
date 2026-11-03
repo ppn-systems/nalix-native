@@ -9,7 +9,19 @@
 #include <stdbool.h>
 #include <string.h>
 
+typedef struct { uint8_t data[16]; } Bytes16;
 typedef struct { uint8_t data[32]; } Bytes32;
+typedef struct { uint8_t data[64]; } Bytes64;
+typedef struct { uint8_t data[16]; } Guid;
+typedef struct { uint8_t data[16]; } Decimal;
+typedef struct { int64_t date_time; int16_t offset_minutes; } DateTimeOffset;
+#if defined(__GNUC__) || defined(__clang__)
+    typedef __int128_t int128_t;
+    typedef __uint128_t uint128_t;
+#else
+    typedef struct { uint8_t data[16]; } int128_t;
+    typedef struct { uint8_t data[16]; } uint128_t;
+#endif
 
 // Length-prefixed UTF-8 string (matches Nalix codec wire format)
 // null = length -1, empty = length 0, otherwise [int32_t length][utf8 bytes]

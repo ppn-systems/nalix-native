@@ -42,54 +42,74 @@ To guarantee byte-level wire interoperability across .NET, C, and Rust, types ma
 | `byte` | `uint8_t` | `u8` | 1 | Unsigned 8-bit integer |
 | `sbyte` | `int8_t` | `i8` | 1 | Signed 8-bit two's complement integer |
 | `bool` | `uint8_t` | `u8` | 1 | `0x00` = false, `0x01` = true |
+| `char` | `uint16_t` | `u16` | 2 | UTF-16 code unit (little-endian) |
 | `short` | `int16_t` | `i16` | 2 | Signed 16-bit little-endian integer |
 | `ushort` | `uint16_t` | `u16` | 2 | Unsigned 16-bit little-endian integer |
 | `int` | `int32_t` | `i32` | 4 | Signed 32-bit little-endian integer |
 | `uint` | `uint32_t` | `u32` | 4 | Unsigned 32-bit little-endian integer |
 | `long` | `int64_t` | `i64` | 8 | Signed 64-bit little-endian integer |
 | `ulong` | `uint64_t` | `u64` | 8 | Unsigned 64-bit little-endian integer |
+| `Int128` | `int128_t` | `i128` | 16 | Signed 128-bit little-endian integer |
+| `UInt128` | `uint128_t` | `u128` | 16 | Unsigned 128-bit little-endian integer |
 
-### 2.2 Floating-Point Types
+### 2.2 Floating-Point & Precision Types
 
 | C# Type | C Type (C99) | Rust Type | Size (Bytes) | Wire Encoding |
 | :--- | :--- | :--- | :--- | :--- |
-| `float` | `float` | `f32` | 4 | IEEE 754 single-precision float (little-endian byte order) |
-| `double` | `double` | `f64` | 8 | IEEE 754 double-precision float (little-endian byte order) |
+| `Half` | `uint16_t` | `u16` | 2 | IEEE 754 half-precision float (16-bit) |
+| `float` | `float` | `f32` | 4 | IEEE 754 single-precision float (32-bit, little-endian) |
+| `double` | `double` | `f64` | 8 | IEEE 754 double-precision float (64-bit, little-endian) |
+| `decimal` | `Decimal` | `[u8; 16]` | 16 | 128-bit decimal (4 x int32 parts in little-endian order) |
 
-### 2.3 Enumerations
+### 2.3 Date, Time & Identifiers
+
+| C# Type | C Type | Rust Type | Size (Bytes) | Wire Encoding |
+| :--- | :--- | :--- | :--- | :--- |
+| `DateTime` | `int64_t` | `i64` | 8 | 64-bit signed integer Ticks (little-endian) |
+| `TimeSpan` | `int64_t` | `i64` | 8 | 64-bit signed integer Ticks (little-endian) |
+| `DateTimeOffset` | `DateTimeOffset` | `[u8; 16]` | 16 | 64-bit Ticks + 16-bit offset minutes |
+| `Guid` | `Guid` | `[u8; 16]` | 16 | 16-byte raw UUID / GUID binary |
+
+### 2.4 Enumerations
 Enumerations are serialized using the size and signedness of their underlying primitive type:
 - An enum based on `byte` maps to `uint8_t` (1 byte).
+- An enum based on `short` maps to `int16_t` (2 bytes, little-endian).
 - An enum based on `ushort` maps to `uint16_t` (2 bytes, little-endian).
 - An enum based on `int` maps to `int32_t` (4 bytes, little-endian).
+- An enum based on `ulong` maps to `uint64_t` (8 bytes, little-endian).
 
-### 2.4 Complex & Length-Prefixed Types
+### 2.5 Fixed-Size Buffers & Length-Prefixed Types
 
 | C# Type | C Type | Rust Type | Fixed Size | Dynamic Size | Wire Layout |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| `Bytes16` | `Bytes16` | `[u8; 16]` | 16 bytes | 0 bytes | Raw 16-byte continuous array (`uint8_t data[16]`) |
 | `Bytes32` | `Bytes32` | `[u8; 32]` | 32 bytes | 0 bytes | Raw 32-byte continuous array (`uint8_t data[32]`) |
+| `Bytes64` | `Bytes64` | `[u8; 64]` | 64 bytes | 0 bytes | Raw 64-byte continuous array (`uint8_t data[64]`) |
 | `PacketHeader` | `PacketHeader` | `PacketHeader` | 6 bytes | 0 bytes | 6-byte packed structure |
 | `string` | `NalixString` | `Vec<u8>` | 4 bytes | N bytes | `[int32_t length][raw UTF-8 bytes]` |
+| `byte[]` | `NalixString` | `Vec<u8>` | 4 bytes | N bytes | `[int32_t length][raw payload bytes]` |
 | `ReadOnlyMemory<byte>` | `NalixString` | `Vec<u8>` | 4 bytes | N bytes | `[int32_t length][raw payload bytes]` |
+| `Memory<byte>` | `NalixString` | `Vec<u8>` | 4 bytes | N bytes | `[int32_t length][raw payload bytes]` |
+| `T?` (`Nullable<T>`) | `has_val + val` | `Option<T>` | 1 + size | 0 bytes | `[uint8_t has_value][payload if has_value == 1]` |
 
-#### 2.4.1 String Wire Encoding Rules
-1. Every string begins with a signed 32-bit integer length prefix (`int32_t` in little-endian order).
+#### 2.5.1 String & Binary Buffer Wire Encoding Rules
+1. Every variable-length field begins with a signed 32-bit integer length prefix (`int32_t` in little-endian order).
 2. If `length == -1`, the value represents `null`. Zero payload bytes follow.
-3. If `length == 0`, the value represents an empty string `""`. Zero payload bytes follow.
-4. If `length > 0`, the prefix is immediately followed by exactly `length` bytes of raw UTF-8 encoded text.
+3. If `length == 0`, the value represents an empty string `""` or 0-length buffer. Zero payload bytes follow.
+4. If `length > 0`, the prefix is immediately followed by exactly `length` bytes of raw payload.
 5. In C implementations, deserialization allocates memory via `malloc()`. The caller must free this memory via `<packet>_free()`.
 
 ---
 
 ## 3. Unsupported Types
 
-The following types cannot be safely mapped to unmanaged wire structures and are rejected by the analyzer:
+The following types cannot be safely mapped to unmanaged flat wire structures and are rejected by the analyzer:
 
 | Type | Reason for Rejection | Prescribed Alternative |
 | :--- | :--- | :--- |
-| `char` | C# `char` is UTF-16 (2 bytes); C/Rust `char` is UTF-8 or ASCII (1 byte). | Use `byte` or `string`. |
-| `decimal` | High-precision floating format without native CPU hardware support in unmanaged targets. | Use `double` or scaled fixed-point integers. |
-| `DateTime` | Architecture-dependent serialization and timezone ambiguity. | Use `long` (Ticks) or `ulong` (Unix epoch seconds). |
-| `Guid` | Ambiguous string vs binary byte-ordering standards across OS platforms. | Use `Bytes16` or two `ulong` fields. |
+| `object` | Polymorphic dynamic reference types cannot be unmanaged flat-packed. | Use concrete packet types or discriminators. |
+| Jagged arrays (`T[][]`) | Multi-pointer indirection is non-flat and architecture-dependent. | Flatten into continuous single-dimensional buffers. |
+| Reference graph collections | Heap reference graphs require dynamic graph walkers. | Use linear arrays or byte payloads. |
 
 ---
 
