@@ -1,4 +1,4 @@
-# Protogen Integration Guide
+# NXProto Integration Guide
 
 ## 1. Embedded C & ESP-IDF Integration
 

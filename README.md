@@ -34,15 +34,17 @@ nalix-native/
 │       ├── tests/                # Verification test suite
 │       └── package.json          # Package manifest
 │
-├── tools/                        # Tooling and generators
-│   └── protogen/                 # Binary contract code generator
-│       ├── src/
-│       │   ├── Protogen.Core/    # Domain models and protocol contracts
-│       │   ├── Protogen.Engine/  # Analysis (Roslyn, Reflection) & Generators (C, Rust, TypeScript)
-│       │   ├── Protogen.Cli/     # Command-line tool executable
-│       │   └── Protogen.slnx     # Tool solution
-│       └── tests/
-│           └── Protogen.Tests/   # Generator unit tests
+├── nxproto/                      # Protocol contract code generator (C#, C, Rust, TypeScript)
+│   ├── src/
+│   │   ├── NXProto.Core/         # Domain models, value objects, protocol contracts
+│   │   ├── NXProto.Engine/       # Analysis (Roslyn, Reflection) & Generators (C, Rust, TypeScript)
+│   │   └── NXProto.Cli/          # Command-line tool executable (nxproto)
+│   ├── tests/
+│   │   ├── NXProto.Core.Tests/   # Domain logic & schema unit tests
+│   │   ├── NXProto.Engine.Tests/ # Generator & analyzer unit tests
+│   │   ├── NXProto.Cli.Tests/    # CLI arguments & option parser unit tests
+│   │   └── NXProto.IntegrationTests/ # End-to-end integration test suite
+│   └── NXProto.slnx              # NXProto solution
 │
 ├── examples/                     # Generated packet samples & round-trip tests
 │   ├── c/                        # Generated C packet codecs & GCC test runner
@@ -70,20 +72,21 @@ The client libraries provide clean, modular, and decoupled abstractions directly
 
 ## Quick Start & Verification
 
-### 1. Protogen Code Generator
+### 1. NXProto Code Generator
 
 ```bash
-# Build Protogen CLI and Engine
-dotnet build tools/protogen/src/Protogen.Cli/Protogen.Cli.csproj
+# Build NXProto CLI and Engine
+dotnet build nxproto/src/NXProto.Cli/NXProto.Cli.csproj
 
-# Run unit tests
-dotnet test tools/protogen/tests/Protogen.Tests/Protogen.Tests.csproj
+# Run test suites (Core, Engine, CLI, Integration)
+dotnet test nxproto/NXProto.slnx
 
-# Run code generator against contract DLL
-dotnet run --project tools/protogen/src/Protogen.Cli/Protogen.Cli.csproj -- \
-    --assembly path/to/Contracts.dll \
-    --output generated/ \
-    --targets c,rust,ts
+# Run code generator against C# project or assembly
+dotnet run --project nxproto/src/NXProto.Cli/NXProto.Cli.csproj -- \
+    --project path/to/Contracts.csproj \
+    --c-out ./dist/c \
+    --rust-out ./dist/rust \
+    --ts-out ./dist/ts
 ```
 
 ### 2. C Client & Codec Test Suite

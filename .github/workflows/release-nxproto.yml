@@ -1,0 +1,79 @@
+name: CD Release NXProto Tool
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'nxproto-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-binaries:
+    name: Build Binary for ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            binary_name: nxproto.exe
+          - os: ubuntu-latest
+            rid: linux-x64
+            binary_name: nxproto
+          - os: macos-latest
+            rid: osx-x64
+            binary_name: nxproto
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Publish Single File Binary
+      run: |
+        dotnet publish nxproto/src/NXProto.Cli/NXProto.Cli.csproj -c Release -r ${{ matrix.rid }} -p:PublishSingleFile=true -p:PublishTrimmed=false --self-contained true -o ./dist/${{ matrix.rid }}
+
+    - name: Zip Binary (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        Compress-Archive -Path ./dist/${{ matrix.rid }}/* -DestinationPath ./nxproto-${{ matrix.rid }}.zip
+
+    - name: Zip Binary (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        chmod +x ./dist/${{ matrix.rid }}/${{ matrix.binary_name }}
+        zip -j nxproto-${{ matrix.rid }}.zip ./dist/${{ matrix.rid }}/${{ matrix.binary_name }}
+
+    - name: Upload Binary Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nxproto-${{ matrix.rid }}
+        path: nxproto-${{ matrix.rid }}.zip
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+        merge-multiple: true
+
+    - name: Display Downloaded Files
+      run: ls -R ./artifacts
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ./artifacts/nxproto-*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

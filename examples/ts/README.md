@@ -1,6 +1,6 @@
 # Nalix Generated TypeScript Codecs & Examples
 
-This package contains TypeScript classes and binary Little-Endian codecs generated automatically by **Protogen** (`Protogen.Engine.Generators.TypeScript.TypeScriptGenerator`) from C# packet contracts.
+This package contains TypeScript classes and binary Little-Endian codecs generated automatically by **NXProto** (`NXProto.Engine.Generators.TypeScript.TypeScriptGenerator`) from C# packet contracts.
 
 ## Overview
 

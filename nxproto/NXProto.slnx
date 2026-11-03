@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NXProto.Core/NXProto.Core.csproj" />
+    <Project Path="src/NXProto.Engine/NXProto.Engine.csproj" />
+    <Project Path="src/NXProto.Cli/NXProto.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NXProto.Core.Tests/NXProto.Core.Tests.csproj" />
+    <Project Path="tests/NXProto.Engine.Tests/NXProto.Engine.Tests.csproj" />
+    <Project Path="tests/NXProto.Cli.Tests/NXProto.Cli.Tests.csproj" />
+    <Project Path="tests/NXProto.IntegrationTests/NXProto.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

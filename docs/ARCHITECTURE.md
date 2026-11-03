@@ -6,7 +6,7 @@ Nalix Native is a unified cross-platform native SDK and tooling repository desig
 
 The repository is partitioned into two primary functional components:
 1. **Transport Sessions (`clients/`):** Canonical, zero-dependency C99, Rust, and TypeScript/Web transport sessions mirroring the Nalix C# SDK (`TransportSession`, `WebSocketSession`, `TcpSession`) with correlated requests, event subscriptions, status codes, and resilient connection lifecycles.
-2. **Protocol Generator (`tools/protogen/`):** A Domain-Driven Design (DDD) utility partitioned into decoupled assemblies adhering to SOLID principles for analyzing C# contracts and generating wire-compatible C and Rust data models.
+2. **Protocol Generator (`nxproto/`):** A Domain-Driven Design (DDD) utility partitioned into decoupled assemblies adhering to SOLID principles for analyzing C# contracts and generating wire-compatible C, Rust, and TypeScript data models.
 
 ```mermaid
 graph TD
@@ -16,10 +16,10 @@ graph TD
         ClientTS["TypeScript Client SDK: WebSocketSession (@ppn/nalix-client)"]
     end
 
-    subgraph Tooling ["Protocol Code Generator (tools/protogen)"]
-        CLI["Protogen.Cli (Console Executable)"]
-        Core["Protogen.Core (Domain Contracts & Models)"]
-        Engine["Protogen.Engine (Roslyn / Reflection Analyzers & Generators)"]
+    subgraph Tooling ["Protocol Code Generator (nxproto)"]
+        CLI["NXProto.Cli (Console Executable nxproto)"]
+        Core["NXProto.Core (Domain Contracts & Models)"]
+        Engine["NXProto.Engine (Roslyn / Reflection Analyzers & Generators)"]
         CLI --> Core
         CLI --> Engine
         Engine --> Core
@@ -90,52 +90,49 @@ The TypeScript client runs directly within web browser runtimes without external
 
 ---
 
-## 3. Protogen Tooling Architecture
+## 3. NXProto Tooling Architecture
 
-### 3.1 Domain Layer (`Protogen.Core`)
+### 3.1 Domain Layer (`NXProto.Core`)
 
 The domain layer encapsulates all business logic, invariant verification, and data models of the protocol representation. It has zero dependencies on external NuGet packages or Roslyn compiler libraries.
 
 ```mermaid
 classDiagram
-    class ProtocolSchema {
-        +string Namespace
-        +IReadOnlyList~PacketDefinition~ Packets
-        +IReadOnlyList~EnumDefinition~ Enums
-    }
-
-    class PacketDefinition {
+    class PacketSchema {
         +string Name
+        +string FullName
         +ushort OpCode
-        +IReadOnlyList~FieldDefinition~ Fields
+        +IReadOnlyList~FieldSchema~ Fields
+        +bool IsFixedSize
+        +int FixedSize
+        +CalculateWireSize() int
+        +Validate() void
     }
 
-    class FieldDefinition {
+    class FieldSchema {
         +string Name
-        +TypeDescriptor Type
+        +string CSharpType
+        +string CType
+        +string RustType
         +int Order
+        +bool IsHeader
+        +int Size
+        +bool IsUnmanaged
+        +bool IsNullable
     }
 
-    class TypeDescriptor {
-        +TypeKind Kind
-        +string ClrTypeName
-        +int? FixedSize
-    }
-
-    ProtocolSchema "1" *-- "*" PacketDefinition
-    PacketDefinition "1" *-- "*" FieldDefinition
-    FieldDefinition "1" *-- "1" TypeDescriptor
+    PacketSchema "1" *-- "*" FieldSchema
 ```
 
-### 3.2 Engine Layer (`Protogen.Engine`)
+### 3.2 Engine Layer (`NXProto.Engine`)
 
-The engine layer coordinates assembly loading, type reflection, AST analysis, validation, and multi-language code generation.
+The engine layer coordinates assembly loading, Roslyn semantic analysis, type resolution, validation, and multi-language code generation (C, Rust, TypeScript).
 
 ```mermaid
 sequenceDiagram
-    participant User as Protogen CLI
-    participant Engine as ProtogenEngine
-    participant Analyzer as ReflectionAnalyzer
+    participant User as NXProto CLI
+    participant Engine as GenerationRunner
+    participant Analyzer as RoslynProjectAnalyzer
     participant Validator as SchemaValidator
     participant EmitterC as CCodeEmitter
     participant EmitterRust as RustCodeEmitter
