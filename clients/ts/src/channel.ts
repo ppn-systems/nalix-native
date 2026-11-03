@@ -31,6 +31,8 @@ export interface ChannelConfigOptions {
   compressionEnabled?: boolean;
   compressionThreshold?: number;
   algorithm?: CipherSuiteType;
+  serverPublicKey?: Uint8Array;
+  allowTofu?: boolean;
 }
 
 export class ChannelConfig {
@@ -49,6 +51,8 @@ export class ChannelConfig {
   public readonly compressionEnabled: boolean;
   public readonly compressionThreshold: number;
   public readonly algorithm: CipherSuiteType;
+  public readonly serverPublicKey?: Uint8Array;
+  public readonly allowTofu: boolean;
   private readonly _overrideUrl?: string;
 
   constructor(options: ChannelConfigOptions | string) {
@@ -77,6 +81,8 @@ export class ChannelConfig {
       this.compressionEnabled = true;
       this.compressionThreshold = 512;
       this.algorithm = CipherSuiteType.Chacha20Poly1305;
+      this.serverPublicKey = undefined;
+      this.allowTofu = true;
     } else {
       if (options.url) {
         this._overrideUrl = options.url;
@@ -110,6 +116,8 @@ export class ChannelConfig {
       this.compressionEnabled = options.compressionEnabled ?? true;
       this.compressionThreshold = options.compressionThreshold ?? 512;
       this.algorithm = options.algorithm ?? CipherSuiteType.Chacha20Poly1305;
+      this.serverPublicKey = options.serverPublicKey;
+      this.allowTofu = options.allowTofu ?? true;
     }
   }
 

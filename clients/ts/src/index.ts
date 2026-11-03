@@ -8,6 +8,7 @@ export * from './state.js';
 export * from './subscription.js';
 export * from './pending.js';
 export * from './reconnect.js';
+export * from './handshake.js';
 export * from './base.js';
 export * from './pipeline.js';
 export * from './session.js';

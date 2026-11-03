@@ -6,6 +6,7 @@ import { SessionState } from './state.js';
 import { Subscription, PacketCallback, StateCallback, SubscriptionManager } from './subscription.js';
 import { PendingRequestManager, RequestOptions } from './pending.js';
 import { FramePipeline } from './pipeline.js';
+import { performHandshake, HandshakeOptions, HandshakeResult } from './handshake.js';
 
 /**
  * Common abstraction contract for client-side transport sessions.
@@ -38,6 +39,7 @@ export interface ITransportSession {
   setSecret(secret: Uint8Array): void;
   enableEncryption(secret?: Uint8Array): void;
   disableEncryption(): void;
+  handshake(options?: HandshakeOptions): Promise<HandshakeResult>;
 }
 
 /**
@@ -272,5 +274,13 @@ export abstract class TransportSession implements ITransportSession {
     });
 
     return performance.now() - start;
+  }
+
+  /**
+   * Executes authenticated X25519 Diffie-Hellman cryptographic handshake matching Nalix C# HandshakeExtensions.
+   * Negotiates session key, verifies server proof against pinned key / TOFU, and enables AEAD encryption.
+   */
+  public async handshake(options?: HandshakeOptions): Promise<HandshakeResult> {
+    return performHandshake(this, options);
   }
 }
