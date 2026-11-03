@@ -3,7 +3,7 @@ name = "nalix-client"
 version = "0.1.0"
 edition = "2021"
 authors = ["PPN Systems"]
-description = "Nalix Native Rust Client SDK adhering to gRPC architectural conventions"
+description = "Nalix Native Rust Client SDK"
 license = "Apache-2.0"
 
 [dependencies]

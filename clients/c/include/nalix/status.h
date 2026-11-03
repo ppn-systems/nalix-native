@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 /**
- * @brief Canonical status codes adhering to the gRPC status model.
+ * @brief Canonical status codes for Nalix client operations.
  */
 typedef enum nalix_status_code {
     NALIX_STATUS_OK                  = 0,

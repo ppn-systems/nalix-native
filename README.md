@@ -4,13 +4,13 @@
 [![Target Runtime](https://img.shields.io/badge/.NET-10.0-blue)](https://dotnet.microsoft.com)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](LICENSE)
 
-Nalix Native is the official cross-platform native SDK and tooling repository for the Nalix binary messaging protocol. It provides gRPC-standard client SDKs (C99, Rust) and an unmanaged code generator (`protogen`) for native systems and embedded runtimes (ESP-IDF, FreeRTOS, STM32, Linux, Windows).
+Nalix Native is the official cross-platform native SDK and tooling repository for the Nalix binary messaging protocol. It provides native high-performance client SDKs (C99, Rust) and an unmanaged code generator (`protogen`) for native systems and embedded runtimes (ESP-IDF, FreeRTOS, STM32, Linux, Windows).
 
 ---
 
 ## Documentation Index
 
-- [Architecture Specification](docs/ARCHITECTURE.md): Domain-Driven Design (DDD), SOLID principles, gRPC-style client contracts, and Roslyn/Reflection analysis pipelines.
+- [Architecture Specification](docs/ARCHITECTURE.md): Domain-Driven Design (DDD), SOLID principles, native client contracts, and Roslyn/Reflection analysis pipelines.
 - [Wire Protocol & Type Specification](docs/SPECIFICATION.md): Nalix v14 6-byte header, opcode discovery, primitive and complex type mappings.
 - [Integration Guide](docs/INTEGRATION.md): Integration patterns for ESP-IDF, FreeRTOS, Linux/POSIX, and Rust services.
 
@@ -22,7 +22,7 @@ The monorepo organizes tooling, client libraries, and codec examples according t
 
 ```plaintext
 nalix-native/
-├── clients/                      # Target client SDKs (gRPC architecture)
+├── clients/                      # Target client SDKs
 │   ├── c/                        # C99 client SDK (ESP-IDF, FreeRTOS, POSIX)
 │   │   ├── include/nalix/        # Public API headers (status, packet, channel, client)
 │   │   ├── src/                  # Client implementation
@@ -53,14 +53,14 @@ nalix-native/
 
 ---
 
-## Client SDK Architecture (gRPC-Style)
+## Client SDK Architecture
 
-The client libraries follow standard gRPC design principles adapted for the high-performance Nalix binary wire protocol:
+The client libraries provide clean, modular, and decoupled abstractions tailored for the high-performance Nalix binary wire protocol:
 
 1. **Status Code Model:** Canonical status codes (0..16: `OK`, `CANCELLED`, `UNKNOWN`, `INVALID_ARGUMENT`, `DEADLINE_EXCEEDED`, `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`, `FAILED_PRECONDITION`, `ABORTED`, `OUT_OF_RANGE`, `UNIMPLEMENTED`, `INTERNAL`, `UNAVAILABLE`, `DATA_LOSS`, `UNAUTHENTICATED`).
 2. **Wire Framing:** Nalix v14 6-byte header (`OpCode`, `Flags`, `Priority`, `SequenceId`) with Little-Endian byte order.
-3. **Channel State Machine:** `IDLE`, `CONNECTING`, `READY`, `TRANSIENT_FAILURE`, `SHUTDOWN`.
-4. **Transport Decoupling:** Core packet framing and channel management are decoupled from underlying physical transports (TCP, UDP, KCP, or serial/UART).
+3. **Channel State Machine:** Deterministic connection lifecycle (`IDLE`, `CONNECTING`, `READY`, `TRANSIENT_FAILURE`, `SHUTDOWN`).
+4. **Transport Decoupling:** Core packet framing and channel management are decoupled from underlying physical transports (TCP, UDP, KCP, WebSocket, or serial/UART).
 
 ---
 

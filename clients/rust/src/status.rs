@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// Canonical status codes adhering to the gRPC status model.
+/// Canonical status codes for Nalix client operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum StatusCode {

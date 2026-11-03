@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-/// Connectivity states matching the gRPC channel state machine.
+/// Connectivity states representing the channel lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ConnectivityState {
     #[default]

@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 /**
- * @brief Connectivity state matching gRPC channel state machine.
+ * @brief Connectivity state representing channel lifecycle.
  */
 typedef enum nalix_connectivity_state {
     NALIX_CHANNEL_IDLE               = 0,

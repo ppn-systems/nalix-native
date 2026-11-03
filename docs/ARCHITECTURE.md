@@ -5,12 +5,12 @@
 Nalix Native is a unified cross-platform native SDK and tooling repository designed for the Nalix binary messaging protocol.
 
 The repository is partitioned into two primary functional components:
-1. **Client SDKs (`clients/`):** Canonical, zero-dependency C99 and Rust client runtime architectures adhering to standard gRPC principles (Status codes, Wire framing, Channel connectivity states, Client lifecycle).
+1. **Client SDKs (`clients/`):** Canonical, zero-dependency C99 and Rust client runtime architectures adhering to clean enterprise transport patterns (Status codes, Wire framing, Channel connectivity states, Client lifecycle).
 2. **Protocol Generator (`tools/protogen/`):** A Domain-Driven Design (DDD) utility partitioned into decoupled assemblies adhering to SOLID principles for analyzing C# contracts and generating wire-compatible C and Rust data models.
 
 ```mermaid
 graph TD
-    subgraph Clients ["Native Client SDKs (gRPC Architecture)"]
+    subgraph Clients ["Native Client SDKs"]
         ClientC["C Client SDK (C99 / ESP-IDF / FreeRTOS / POSIX)"]
         ClientRust["Rust Client SDK (nalix-client)"]
     end
@@ -35,12 +35,12 @@ graph TD
 
 ---
 
-## 2. Client SDK Architecture (gRPC Standards)
+## 2. Client SDK Architecture
 
-The client runtime libraries (`clients/c/` and `clients/rust/`) adopt canonical gRPC patterns tailored for high-throughput, low-overhead binary messaging:
+The client runtime libraries (`clients/c/` and `clients/rust/`) adopt canonical network client patterns tailored for high-throughput, low-overhead binary messaging:
 
 ### 2.1 Canonical Status Codes
-Error handling strictly maps to the 17 standard gRPC status codes:
+Error handling strictly maps to 17 standard status codes:
 - `0: OK`
 - `1: CANCELLED`
 - `2: UNKNOWN`
@@ -67,7 +67,7 @@ Every packet consists of a 6-byte Little-Endian binary header followed by an arb
 - `SequenceId` (2 bytes, uint16)
 
 ### 2.3 Channel Connectivity State Machine
-Channels transition through deterministic states matching the gRPC channel lifecycle:
+Channels transition through deterministic states matching the client connection lifecycle:
 - `IDLE`: Initial state before establishing connection or after prolonged inactivity.
 - `CONNECTING`: Attempting transport connection / handshake.
 - `READY`: Connection established and available for packet exchange.
