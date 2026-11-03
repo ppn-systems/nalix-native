@@ -5,12 +5,23 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "nalix/status.h"
+#include "nalix/protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define NALIX_HEADER_SIZE 6
+
+/**
+ * @brief Nalix Wire Protocol Packet Flags.
+ */
+typedef enum nalix_packet_flags {
+    NALIX_PACKET_FLAG_NONE       = 0x00,
+    NALIX_PACKET_FLAG_COMPRESSED = 0x02,
+    NALIX_PACKET_FLAG_ENCRYPTED  = 0x04,
+    NALIX_PACKET_FLAG_FRAGMENTED = 0x08
+} nalix_packet_flags_t;
 
 #if defined(__GNUC__) || defined(__clang__)
 #define NALIX_PACKED __attribute__((packed))
@@ -54,7 +65,7 @@ static inline nalix_packet_t nalix_packet_create(
 ) {
     nalix_packet_t pkt;
     pkt.header.opcode = opcode;
-    pkt.header.flags = 0;
+    pkt.header.flags = NALIX_PACKET_FLAG_NONE;
     pkt.header.priority = 0;
     pkt.header.sequence_id = 0;
     pkt.payload = payload;

@@ -28,9 +28,21 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Compile and Run C Session Tests
+    - name: Compile and Run C Session & Pipeline Tests
       run: |
-        gcc -Wall -Wextra -Werror -Iclients/c/include clients/c/src/status.c clients/c/src/packet.c clients/c/src/session.c clients/c/tests/session_test.c -o session_test
+        gcc -Wall -Wextra -Werror -Iclients/c/include -Iclients/c/src \
+          clients/c/src/status.c \
+          clients/c/src/packet.c \
+          clients/c/src/compression.c \
+          clients/c/src/security.c \
+          clients/c/src/handshake.c \
+          clients/c/src/pipeline.c \
+          clients/c/src/session.c \
+          clients/c/src/third_party/lz4/lz4.c \
+          clients/c/src/third_party/monocypher/monocypher.c \
+          clients/c/src/third_party/keccak/keccak256.c \
+          clients/c/tests/session_test.c \
+          -o session_test
         ./session_test
 
     - name: Compile and Run Generated C Codec Tests
