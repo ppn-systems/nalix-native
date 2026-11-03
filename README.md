@@ -38,7 +38,7 @@ nalix-native/
 │   └── protogen/                 # Binary contract code generator
 │       ├── src/
 │       │   ├── Protogen.Core/    # Domain models and protocol contracts
-│       │   ├── Protogen.Engine/  # Analysis (Roslyn, Reflection) & Generators (C, Rust)
+│       │   ├── Protogen.Engine/  # Analysis (Roslyn, Reflection) & Generators (C, Rust, TypeScript)
 │       │   ├── Protogen.Cli/     # Command-line tool executable
 │       │   └── Protogen.slnx     # Tool solution
 │       └── tests/
@@ -46,7 +46,8 @@ nalix-native/
 │
 ├── examples/                     # Generated packet samples & round-trip tests
 │   ├── c/                        # Generated C packet codecs & GCC test runner
-│   └── rust/                     # Generated Rust packet codecs & Cargo test runner
+│   ├── rust/                     # Generated Rust packet codecs & Cargo test runner
+│   └── ts/                       # Generated TypeScript packet codecs & Node.js test runner
 │
 ├── docs/                         # Specifications and architecture documentation
 ├── .github/workflows/            # CI/CD verification & release automation
@@ -82,7 +83,7 @@ dotnet test tools/protogen/tests/Protogen.Tests/Protogen.Tests.csproj
 dotnet run --project tools/protogen/src/Protogen.Cli/Protogen.Cli.csproj -- \
     --assembly path/to/Contracts.dll \
     --output generated/ \
-    --targets c,rust
+    --targets c,rust,ts
 ```
 
 ### 2. C Client & Codec Test Suite
@@ -109,11 +110,14 @@ cargo test --manifest-path clients/rust/Cargo.toml
 cargo test --manifest-path examples/rust/Cargo.toml
 ```
 
-### 4. TypeScript / Web Client Test Suite
+### 4. TypeScript / Web Client & Codec Test Suite
 
 ```bash
-# Test TypeScript Client SDK
+# Test TypeScript Client SDK (@ppn/nalix-client)
 cd clients/ts && npm test
+
+# Test generated TypeScript codecs
+cd examples/ts && npm test
 ```
 
 ---

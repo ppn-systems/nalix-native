@@ -175,7 +175,9 @@ export class WebSocketSession {
       }, this.config.connectTimeoutMs);
 
       try {
-        const ws = new WebSocketImpl(this.config.url, this.config.subprotocol);
+        const ws = this.config.subprotocol
+          ? new WebSocketImpl(this.config.url, this.config.subprotocol)
+          : new WebSocketImpl(this.config.url);
         ws.binaryType = 'arraybuffer';
         this._ws = ws;
 

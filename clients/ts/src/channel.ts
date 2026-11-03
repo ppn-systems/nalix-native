@@ -33,7 +33,7 @@ export class ChannelConfig {
   public readonly port: number;
   public readonly path: string;
   public readonly useTls: boolean;
-  public readonly subprotocol: string;
+  public readonly subprotocol?: string;
   public readonly connectTimeoutMs: number;
   public readonly requestTimeoutMs: number;
   public readonly maxMessageSize: number;
@@ -58,7 +58,7 @@ export class ChannelConfig {
         this.port = 443;
         this.path = '/ws/';
       }
-      this.subprotocol = 'nalix.v1';
+      this.subprotocol = undefined;
       this.connectTimeoutMs = 10000;
       this.requestTimeoutMs = 5000;
       this.maxMessageSize = 65536;
@@ -88,7 +88,7 @@ export class ChannelConfig {
         this.path = options.path ? (options.path.startsWith('/') ? options.path : `/${options.path}`) : '/ws/';
       }
 
-      this.subprotocol = options.subprotocol ?? 'nalix.v1';
+      this.subprotocol = options.subprotocol;
       this.connectTimeoutMs = options.connectTimeoutMs ?? 10000;
       this.requestTimeoutMs = options.requestTimeoutMs ?? 5000;
       this.maxMessageSize = options.maxMessageSize ?? 65536;

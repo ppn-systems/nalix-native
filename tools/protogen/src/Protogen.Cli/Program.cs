@@ -6,6 +6,7 @@ using Protogen.Core.Models;
 using Protogen.Engine.Analysis;
 using Protogen.Engine.Generators.C;
 using Protogen.Engine.Generators.Rust;
+using Protogen.Engine.Generators.TypeScript;
 
 #pragma warning disable CA1303 // Do not pass literals as localized parameters
 #pragma warning disable CA1848 // Use the LoggerMessage delegates
@@ -29,6 +30,7 @@ internal static class Program
         string? assemblyPath = null;
         string? cOut = null;
         string? rustOut = null;
+        string? tsOut = null;
         bool verbose = false;
 
         for (int i = 0; i < args.Length; i++)
@@ -49,6 +51,10 @@ internal static class Program
                 case "--rust-out":
                     if (i + 1 < args.Length) rustOut = args[++i];
                     break;
+                case "--ts-out":
+                case "-t":
+                    if (i + 1 < args.Length) tsOut = args[++i];
+                    break;
                 case "--verbose":
                 case "-v":
                     verbose = true;
@@ -67,9 +73,9 @@ internal static class Program
             return 1;
         }
 
-        if (string.IsNullOrEmpty(cOut) && string.IsNullOrEmpty(rustOut))
+        if (string.IsNullOrEmpty(cOut) && string.IsNullOrEmpty(rustOut) && string.IsNullOrEmpty(tsOut))
         {
-            Console.WriteLine("Error: At least one target output directory (--c-out or --rust-out) must be specified.\n");
+            Console.WriteLine("Error: At least one target output directory (--c-out, --rust-out, or --ts-out) must be specified.\n");
             ShowHelp();
             return 1;
         }
@@ -105,6 +111,11 @@ internal static class Program
             if (!string.IsNullOrEmpty(rustOut))
             {
                 await RunGeneratorAsync(new RustGenerator(), packets, rustOut).ConfigureAwait(false);
+            }
+
+            if (!string.IsNullOrEmpty(tsOut))
+            {
+                await RunGeneratorAsync(new TypeScriptGenerator(), packets, tsOut).ConfigureAwait(false);
             }
 
             Console.WriteLine("Code generation completed successfully.");
@@ -155,8 +166,8 @@ internal static class Program
     private static void ShowHelp()
     {
         Console.WriteLine("Description:");
-        Console.WriteLine("  Code generator transforming C# packet schemas into unmanaged C (C99/ESP-IDF)");
-        Console.WriteLine("  and Rust models with zero external dependencies.");
+        Console.WriteLine("  Code generator transforming C# packet schemas into unmanaged C (C99/ESP-IDF),");
+        Console.WriteLine("  Rust models, and TypeScript/Web classes with zero external dependencies.");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  protogen [options]");
@@ -166,6 +177,7 @@ internal static class Program
         Console.WriteLine("  -a, --assembly <path>    Path to the compiled C# assembly (.dll) containing packet contracts");
         Console.WriteLine("  --c-out <dir>            Output directory for generated C headers and source");
         Console.WriteLine("  --rust-out <dir>         Output directory for generated Rust modules");
+        Console.WriteLine("  -t, --ts-out <dir>       Output directory for generated TypeScript classes");
         Console.WriteLine("  -v, --verbose            Enable verbose diagnostic output and stack traces");
         Console.WriteLine("  -h, --help               Display command-line help documentation");
         Console.WriteLine();

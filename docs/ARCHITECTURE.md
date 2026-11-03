@@ -28,6 +28,7 @@ graph TD
     subgraph Outputs ["Generated Outputs & Codecs"]
         CCodecs["Generated C Codecs (packets.h / packets.c)"]
         RustCodecs["Generated Rust Codecs (packets.rs)"]
+        TSCodecs["Generated TypeScript Codecs (packets.ts)"]
     end
 
     Tooling --> Outputs
@@ -138,6 +139,7 @@ sequenceDiagram
     participant Validator as SchemaValidator
     participant EmitterC as CCodeEmitter
     participant EmitterRust as RustCodeEmitter
+    participant EmitterTS as TypeScriptCodeEmitter
 
     User->>Engine: Generate(options)
     Engine->>Analyzer: AnalyzeAssembly(path)
@@ -148,6 +150,8 @@ sequenceDiagram
     EmitterC-->>Engine: packets.h / packets.c
     Engine->>EmitterRust: Emit(schema)
     EmitterRust-->>Engine: packets.rs
+    Engine->>EmitterTS: Emit(schema)
+    EmitterTS-->>Engine: packets.ts
     Engine-->>User: GenerationReport (Success)
 ```
 
