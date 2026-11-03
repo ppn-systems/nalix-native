@@ -1,0 +1,39 @@
+name: CI C Client & Bindings
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'clients/c/**'
+      - 'examples/c/**'
+      - '.github/workflows/ci-client-c.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'clients/c/**'
+      - 'examples/c/**'
+      - '.github/workflows/ci-client-c.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-client-c-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test-c:
+    name: Build & Verify C Client & Codecs (GCC)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Compile and Run C Client Tests
+      run: |
+        gcc -Wall -Wextra -Werror -Iclients/c/include clients/c/src/status.c clients/c/src/packet.c clients/c/src/client.c clients/c/tests/client_test.c -o client_test
+        ./client_test
+
+    - name: Compile and Run Generated C Codec Tests
+      run: |
+        gcc -Wall -Wextra -Werror -Iexamples/c/include examples/c/src/packets.c examples/c/tests/packet_test.c -o packet_test
+        ./packet_test

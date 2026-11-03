@@ -1,0 +1,38 @@
+name: CI Rust Client & Bindings
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'clients/rust/**'
+      - 'examples/rust/**'
+      - '.github/workflows/ci-client-rust.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'clients/rust/**'
+      - 'examples/rust/**'
+      - '.github/workflows/ci-client-rust.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-client-rust-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test-rust:
+    name: Build & Verify Rust Client & Codecs (Cargo)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Run Rust Client Tests
+      run: cargo test --manifest-path clients/rust/Cargo.toml --verbose
+
+    - name: Run Generated Rust Codec Tests
+      run: cargo test --manifest-path examples/rust/Cargo.toml --verbose

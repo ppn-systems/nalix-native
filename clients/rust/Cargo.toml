@@ -1,0 +1,12 @@
+[package]
+name = "nalix-client"
+version = "0.1.0"
+edition = "2021"
+authors = ["PPN Systems"]
+description = "Nalix Native Rust Client SDK"
+license = "Apache-2.0"
+
+[dependencies]
+tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "handshake"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+url = "2.5"

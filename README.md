@@ -1,85 +1,92 @@
-# Protogen
+# Nalix Native
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/ppn-systems/protogen)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/ppn-systems/nalix-native)
 [![Target Runtime](https://img.shields.io/badge/.NET-10.0-blue)](https://dotnet.microsoft.com)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](LICENSE)
 
-Protogen is a cross-platform protocol code generator that converts C# binary packet contracts into native C (C99, ESP-IDF, FreeRTOS) and Rust data structures matching the Nalix v14 wire protocol.
+Nalix Native is the official cross-platform native SDK and tooling repository for the Nalix binary messaging protocol. It provides native high-performance client SDKs (C99, Rust) and an unmanaged code generator (`protogen`) for native systems and embedded runtimes (ESP-IDF, FreeRTOS, STM32, Linux, Windows).
 
 ---
 
 ## Documentation Index
 
-- [Architecture Specification](docs/ARCHITECTURE.md): Domain-Driven Design (DDD), SOLID architecture, Roslyn and Reflection analysis pipelines.
+- [Architecture Specification](docs/ARCHITECTURE.md): Domain-Driven Design (DDD), SOLID principles, native client contracts, and Roslyn/Reflection analysis pipelines.
 - [Wire Protocol & Type Specification](docs/SPECIFICATION.md): Nalix v14 6-byte header, opcode discovery, primitive and complex type mappings.
-- [Integration Guide](docs/INTEGRATION.md): Integration patterns for ESP-IDF, Arduino, FreeRTOS, and Rust services.
+- [Integration Guide](docs/INTEGRATION.md): Integration patterns for ESP-IDF, FreeRTOS, Linux/POSIX, and Rust services.
 
 ---
 
-## System Overview
+## Repository Structure
 
-Protogen operates as an unmanaged code generator targeting embedded and native environments:
-
-- **Wire Compatibility:** Emits binary layouts matching Nalix v14 (6-byte header consisting of OpCode, Flags, Priority, and SequenceId; Little-Endian byte order; length-prefixed strings).
-- **Alignment Safety:** Generates sequential bitshift decoding routines for non-aligned memory access environments (e.g., Xtensa, RISC-V, ARM Cortex-M).
-- **Multi-Compiler Packing:** Emits compilation guards for GCC/Clang (`__attribute__((packed))` and `#pragma pack(push, 1)`) and MSVC.
-- **Standalone Analysis:** Does not require runtime references or project dependencies to Nalix assemblies. Parses contracts via Roslyn compilation workspaces or reflection metadata.
-
----
-
-## Project Structure
-
-The solution adheres to clean architecture boundaries:
+The monorepo organizes tooling, client libraries, and codec examples according to canonical protocol engineering standards:
 
 ```plaintext
-src/
-├── Protogen.Core/        # Domain models, contracts, and protocol constants
-│   ├── Constants/        # ProtocolConstants, ContractMetadata
-│   ├── Models/           # PacketSchema, FieldSchema, GeneratedFile
-│   └── Contracts/        # IContractAnalyzer, ICodeGenerator, GenerationContext
+nalix-native/
+├── clients/                      # Target client SDKs
+│   ├── c/                        # C99 client SDK (ESP-IDF, FreeRTOS, POSIX)
+│   │   ├── include/nalix/        # Public API headers (status, packet, channel, client)
+│   │   ├── src/                  # Client implementation
+│   │   ├── tests/                # Verification test suite
+│   │   └── CMakeLists.txt        # CMake build configuration
+│   └── rust/                     # Rust client SDK (nalix-client crate)
+│       ├── src/                  # Client implementation (status, packet, channel, client)
+│       └── Cargo.toml            # Crate manifest
 │
-├── Protogen.Engine/      # Analysis and generation implementations
-│   ├── Analysis/         # RoslynProjectAnalyzer, ReflectionAssemblyAnalyzer, TypeResolver
-│   └── Generators/       # CGenerator, RustGenerator
+├── tools/                        # Tooling and generators
+│   └── protogen/                 # Binary contract code generator
+│       ├── src/
+│       │   ├── Protogen.Core/    # Domain models and protocol contracts
+│       │   ├── Protogen.Engine/  # Analysis (Roslyn, Reflection) & Generators (C, Rust)
+│       │   ├── Protogen.Cli/     # Command-line tool executable
+│       │   └── Protogen.slnx     # Tool solution
+│       └── tests/
+│           └── Protogen.Tests/   # Generator unit tests
 │
-├── Protogen.Cli/         # Command-line interface
-│   └── Program.cs        # CLI entry point, argument parsing
+├── examples/                     # Generated packet samples & round-trip tests
+│   ├── c/                        # Generated C packet codecs & GCC test runner
+│   └── rust/                     # Generated Rust packet codecs & Cargo test runner
 │
-tests/
-└── Protogen.Tests/       # Unit and regression test suite
+├── docs/                         # Specifications and architecture documentation
+├── .github/workflows/            # CI/CD verification & release automation
+└── Nalix.Native.slnx             # Root solution for .NET components
 ```
 
 ---
 
-## Compilation
+## Client SDK Architecture
 
-Prerequisites: .NET 10.0 SDK.
+The client libraries provide clean, modular, and decoupled abstractions tailored for the high-performance Nalix binary wire protocol:
+
+1. **Status Code Model:** Canonical status codes (0..16: `OK`, `CANCELLED`, `UNKNOWN`, `INVALID_ARGUMENT`, `DEADLINE_EXCEEDED`, `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`, `FAILED_PRECONDITION`, `ABORTED`, `OUT_OF_RANGE`, `UNIMPLEMENTED`, `INTERNAL`, `UNAVAILABLE`, `DATA_LOSS`, `UNAUTHENTICATED`).
+2. **Wire Framing:** Nalix v14 6-byte header (`OpCode`, `Flags`, `Priority`, `SequenceId`) with Little-Endian byte order.
+3. **Channel State Machine:** Deterministic connection lifecycle (`IDLE`, `CONNECTING`, `READY`, `TRANSIENT_FAILURE`, `SHUTDOWN`).
+4. **Transport Decoupling:** Core packet framing and channel management are decoupled from underlying physical transports (TCP, UDP, KCP, WebSocket, or serial/UART).
+
+---
+
+## Tooling: Protogen
+
+`protogen` converts C# binary packet contracts into zero-dependency C and Rust data structures and codecs.
+
+### Compilation (.NET 10)
 
 ```bash
-# Build the solution in Release configuration
-dotnet build src/Protogen.slnx -c Release
+# Build tool via root solution
+dotnet build Nalix.Native.slnx -c Release
 
-# Run automated tests
-dotnet test src/Protogen.slnx -c Release
+# Run generator test suite
+dotnet test Nalix.Native.slnx -c Release
 
 # Publish standalone executable
-dotnet publish src/Protogen.Cli/Protogen.Cli.csproj -c Release -o bin/
+dotnet publish tools/protogen/src/Protogen.Cli/Protogen.Cli.csproj -c Release -o bin/
 ```
 
-The resulting CLI binary is emitted to `bin/protogen` (`bin/protogen.exe` on Windows).
-
----
-
-## Command-Line Interface
-
-### Syntax
+### CLI Usage
 
 ```bash
 protogen --project <path-to-csproj> --c-out <dir> [--rust-out <dir>] [options]
 protogen --assembly <path-to-dll> --c-out <dir> [--rust-out <dir>] [options]
 ```
-
-### Options
 
 | Option | Short | Description |
 | :--- | :--- | :--- |
@@ -92,21 +99,34 @@ protogen --assembly <path-to-dll> --c-out <dir> [--rust-out <dir>] [options]
 
 ---
 
-## Verification
+## Verification & Testing
 
-### C Test Suite
+### 1. Protogen (.NET Test Suite)
 
 ```bash
-cd examples/c
-gcc -Wall -Wextra -Iinclude src/packets.c tests/packet_test.c -o packet_test
+dotnet test tools/protogen/src/Protogen.slnx -c Release
+```
+
+### 2. C Client & Codec Test Suite
+
+```bash
+# Test C Client SDK
+gcc -Wall -Wextra -Iclients/c/include clients/c/src/status.c clients/c/src/packet.c clients/c/src/client.c clients/c/tests/client_test.c -o client_test
+./client_test
+
+# Test Generated C Codecs
+gcc -Wall -Wextra -Iexamples/c/include examples/c/src/packets.c examples/c/tests/packet_test.c -o packet_test
 ./packet_test
 ```
 
-### Rust Test Suite
+### 3. Rust Client & Codec Test Suite
 
 ```bash
-cd examples/rust
-cargo test
+# Test Rust Client SDK
+cargo test --manifest-path clients/rust/Cargo.toml
+
+# Test Generated Rust Codecs
+cargo test --manifest-path examples/rust/Cargo.toml
 ```
 
 ---

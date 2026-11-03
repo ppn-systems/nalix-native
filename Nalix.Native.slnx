@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="tools/protogen/src/Protogen.Core/Protogen.Core.csproj" />
+  <Project Path="tools/protogen/src/Protogen.Engine/Protogen.Engine.csproj" />
+  <Project Path="tools/protogen/src/Protogen.Cli/Protogen.Cli.csproj" />
+  <Project Path="tools/protogen/tests/Protogen.Tests/Protogen.Tests.csproj" />
+</Solution>
