@@ -1,192 +1,233 @@
-# Nalix Protogen Integration Guide
+# Protogen Integration Guide (ESP32, Microcontrollers & Rust)
 
-This guide describes how to integrate the generated C and Rust protocol bindings into your applications.
+This guide walks you through integrating Protogen-generated **C** and **Rust** protocol code into embedded targets (ESP32, ESP8266, STM32, Arduino) and native servers.
 
 ---
 
-## 1. C Integration Guide
+## 1. Embedded C & ESP-IDF Integration
 
-### A. File Setup & Compilation
-1. Copy the generated files to your source tree:
-   * **Headers:** Copy `packets.h` into your `include/` directory.
-   * **Source:** Copy `packets.c` into your `src/` directory.
-2. Ensure your build system includes the header path (e.g., `-Iinclude`) and compiles `packets.c` alongside your code.
-   ```bash
-   gcc -Iinclude -o my_app src/main.c src/packets.c
-   ```
+The generated C code complies with ANSI C99, requires only standard C headers (`<stdint.h>`, `<stddef.h>`, `<string.h>`, `<stdlib.h>`), and has zero external library dependencies.
 
-### B. Serialization (Writing Packets)
-To serialize a structure, allocate a buffer of at least `XXX_SIZE` (which is `#define`d in the header), fill the fields, and call the serialize function:
+### A. ESP-IDF Component Structure
 
-```c
-#include "packets.h"
-#include <stdio.h>
+Place the generated files into an ESP-IDF component or your `main` directory:
 
-void send_access_request(void)
-{
-    ObservabilityAccess pkt;
-    memset(&pkt, 0, sizeof(pkt));
-
-    // 1. Initialize packet header (Magic number is set automatically by sender if desired)
-    pkt.Header.MagicNumber = PACKET_OBSERVABILITYACCESS;
-    pkt.Header.OpCode = 0x0B;
-    pkt.Header.Flags = 0x03; // RELIABLE | SYSTEM
-    pkt.Header.Priority = 0x02; // URGENT
-    pkt.Header.SequenceId = 120;
-
-    // 2. Initialize payload fields
-    pkt.Stage = 0x01; // REQUEST
-    pkt.Reason = 0;   // NONE
-    pkt.AccessLevel = 0; // NONE
-    
-    // Assign 32-byte hash
-    Bytes32 key = {{ 0xAA, 0xBB, 0xCC }};
-    pkt.AccessKey = key;
-
-    // 3. Serialize into buffer
-    uint8_t buffer[OBSERVABILITYACCESS_SIZE];
-    size_t bytes_written = observabilityaccess_serialize(&pkt, buffer, sizeof(buffer));
-
-    if (bytes_written == 0) {
-        printf("Serialization failed! Buffer too small.\n");
-        return;
-    }
-
-    // Send 'buffer' containing 'bytes_written' over the network...
-}
+```plaintext
+my_esp32_project/
+├── CMakeLists.txt
+└── main/
+    ├── CMakeLists.txt
+    ├── main.c
+    ├── include/
+    │   └── packets.h         <-- Generated C header
+    └── src/
+        └── packets.c         <-- Generated C implementation
 ```
 
-### C. Deserialization (Reading Packets)
-When receiving bytes from the wire, call the deserialize function:
+#### `main/CMakeLists.txt`
+```cmake
+idf_component_register(
+    SRCS "main.c" "src/packets.c"
+    INCLUDE_DIRS "include"
+)
+```
+
+---
+
+### B. Sending a Packet (Serialization)
+
+Use the `<packet>_init()` function to initialize the struct and assign its default `OpCode`. Then fill the payload fields and serialize:
 
 ```c
 #include "packets.h"
-#include <stdio.h>
+#include "esp_log.h"
+#include <string.h>
 
-void handle_received_packet(const uint8_t* net_buffer, size_t net_buffer_size)
+static const char *TAG = "NET_CLIENT";
+
+void send_control_packet(int socket_fd)
 {
-    // Ensure we have at least the minimum static size
-    if (net_buffer_size < OBSERVABILITYACCESS_SIZE) {
-        printf("Packet too short!\n");
-        return;
-    }
+    Control pkt;
+    // 1. Initialize struct and assign pkt.header.op_code = PACKET_CONTROL_OPCODE
+    control_init(&pkt);
 
-    ObservabilityAccess pkt;
-    memset(&pkt, 0, sizeof(pkt));
+    // 2. Set header flags and sequence tracking
+    pkt.header.flags = 0x01; // RELIABLE
+    pkt.header.priority = 0x02; // URGENT
+    pkt.header.sequence_id = 101;
 
-    size_t bytes_read = observabilityaccess_deserialize(&pkt, net_buffer, net_buffer_size);
-    if (bytes_read == 0) {
-        printf("Deserialization failed (malformed payload or buffer overflow).\n");
-        return;
-    }
+    // 3. Set payload fields
+    pkt.reason = 200; // OK
+    pkt.type = 1;     // PING
 
-    // Access packet fields
-    if (pkt.Header.MagicNumber == PACKET_OBSERVABILITYACCESS) {
-        printf("Received access packet. Stage: %d, Access Level: %d\n", pkt.Stage, pkt.AccessLevel);
+    // 4. Allocate transmission buffer using compile-time FIXED_SIZE
+    uint8_t tx_buf[CONTROL_SIZE];
+    size_t written = control_serialize(&pkt, tx_buf, sizeof(tx_buf));
+
+    if (written > 0) {
+        // Send tx_buf over TCP/UDP/WebSocket socket
+        send(socket_fd, tx_buf, written, 0);
+        ESP_LOGI(TAG, "Sent Control packet (%d bytes)", (int)written);
+    } else {
+        ESP_LOGE(TAG, "Failed to serialize Control packet");
     }
 }
 ```
 
-### D. ⚠️ Memory Management & Freeing
-If a packet contains variable-sized fields (like `NalixString` mapped from C# `string` or `ReadOnlyMemory<byte>`), **deserialization performs dynamic memory allocation (`malloc`)** for the payload bytes. 
+---
 
-To prevent memory leaks, you **must call the corresponding `xxx_free` helper** when you are done with the packet:
+### C. Receiving and Dispatching Incoming Packets
+
+Read the first 6 bytes into `PacketHeader` to inspect the `OpCode`, then deserialize the specific packet payload:
 
 ```c
-void process_observation_response(const uint8_t* buf, size_t size)
-{
-    RuntimeObservation pkt;
-    memset(&pkt, 0, sizeof(pkt));
+#include "packets.h"
+#include "esp_log.h"
 
-    if (runtimeobservation_deserialize(&pkt, buf, size) > 0) {
-        // Safe to read observation data
-        if (pkt.ObservationData.length > 0) {
-            printf("Data: %s\n", (char*)pkt.ObservationData.data);
+void handle_incoming_network_stream(const uint8_t *rx_buf, size_t rx_len)
+{
+    // 1. Verify minimum frame length for the 6-byte header
+    if (rx_len < PACKET_HEADER_SIZE) {
+        ESP_LOGW(TAG, "Incomplete packet header");
+        return;
+    }
+
+    // 2. Read packet header to inspect the OpCode
+    PacketHeader header;
+    if (packet_header_deserialize(&header, rx_buf, rx_len) == 0) {
+        ESP_LOGE(TAG, "Malformed packet header");
+        return;
+    }
+
+    // 3. Dispatch packet based on 16-bit OpCode
+    switch (header.op_code) {
+        case PACKET_CONTROL_OPCODE: {
+            Control pkt;
+            if (control_deserialize(&pkt, rx_buf, rx_len) > 0) {
+                ESP_LOGI(TAG, "Received Control: reason=%u, type=%u", pkt.reason, pkt.type);
+            }
+            break;
         }
 
-        // CRITICAL: Free dynamic string/byte memory allocated by deserialize
-        runtimeobservation_free(&pkt);
+        case PACKET_TIMESYNC_OPCODE: {
+            TimeSync pkt;
+            if (time_sync_deserialize(&pkt, rx_buf, rx_len) > 0) {
+                ESP_LOGI(TAG, "TimeSync client_ticks=%lld", (long long)pkt.client_send_ticks);
+            }
+            break;
+        }
+
+        default:
+            ESP_LOGW(TAG, "Unknown OpCode: 0x%04X", header.op_code);
+            break;
     }
 }
 ```
 
 ---
 
-## 2. Rust Integration Guide
+### D. Variable-Length Fields & Memory Management
 
-### A. Including Generated Packets
-Copy the generated file `packets.rs` to your project (usually inside `src/`) and reference it in `lib.rs` or `main.rs`:
+For packets containing variable-length `string` or `ReadOnlyMemory<byte>` fields:
+* Deserialization dynamically allocates memory with `malloc()` to store the payload bytes.
+* Always call `<packet>_free(&pkt)` when finished with the packet to prevent heap fragmentation or memory leaks on microcontrollers.
+
+```c
+void process_variable_packet(const uint8_t *buf, size_t len)
+{
+    DynamicMessage pkt;
+    if (dynamic_message_deserialize(&pkt, buf, len) > 0) {
+        if (pkt.payload.data != NULL) {
+            ESP_LOGI(TAG, "Payload: %.*s", (int)pkt.payload.length, (char*)pkt.payload.data);
+        }
+
+        // CRITICAL: Free dynamically allocated payload memory
+        dynamic_message_free(&pkt);
+    }
+}
+```
+
+---
+
+### E. Microcontroller Alignment Safety
+
+Microcontrollers with **Xtensa** (ESP32, ESP8266) or **ARM Cortex-M0/M3** cores trigger hardware exceptions when accessing multi-byte integers from unaligned memory addresses.
+
+Protogen's generated C serializer uses **sequential bitshift decoding**:
+```c
+uint16_t val = (uint16_t)(ptr[0] | ((uint16_t)ptr[1] << 8));
+```
+This guarantees 100% alignment safety regardless of where `rx_buf` is placed in SRAM.
+
+---
+
+## 2. Cryptographic Handshake on Microcontrollers
+
+If your ESP32 client connects to a Nalix server requiring session establishment (Proof-of-Work, Diffie-Hellman Key Exchange, HMAC verification):
+
+* **Built-in `mbedtls` (ESP-IDF):** Use ESP-IDF's hardware-accelerated `mbedtls` for SHA-256 and AES-GCM.
+* **Monocypher:** For lightweight embedded devices, [Monocypher](https://monocypher.org/) offers a compact (~2KB ROM), zero-heap library implementing:
+  * Blake2b hashing (for Proof-of-Work verification).
+  * X25519 key exchange (for ECDH session keys).
+  * ChaCha20-Poly1305 (for AEAD encryption).
+
+---
+
+## 3. Rust Integration Guide
+
+### A. Setup in `Cargo.toml`
+
+Add the generated module to your Rust project:
+
+```plaintext
+my_rust_service/
+├── Cargo.toml
+└── src/
+    ├── main.rs
+    ├── packets.rs         <-- Generated Rust module
+    └── packets_tests.rs   <-- Generated round-trip tests
+```
+
+In `src/main.rs` or `src/lib.rs`:
 
 ```rust
 pub mod packets;
-
-use packets::{ObservabilityAccess, PacketHeader};
+use packets::{Control, PacketHeader};
 ```
 
-### B. Serialization
-Use the `.serialize()` method on any packet struct. The buffer must be large enough to hold the fixed size (and dynamic payloads if variable size):
+---
+
+### B. Serialization & Deserialization
 
 ```rust
-use packets::{ObservabilityAccess, PacketHeader};
+use packets::{Control, PacketHeader};
 
-fn run_serialization() -> Result<(), ()> {
-    let mut pkt = ObservabilityAccess::default();
-    
-    // Fill header
-    pkt.header.magic_number = ObservabilityAccess::MAGIC;
-    pkt.header.op_code = 0x0B;
-    pkt.header.sequence_id = 42;
+fn send_packet() -> Result<Vec<u8>, ()> {
+    let mut pkt = Control::default();
+    pkt.header.op_code = Control::OPCODE;
+    pkt.header.flags = 0x01;
+    pkt.reason = 200;
+    pkt.r#type = 1;
 
-    // Fill fields
-    pkt.stage = 2; // RESPONSE
-    pkt.access_level = 4; // ADMIN
-    pkt.access_key = [0x55u8; 32];
+    let mut buf = vec![0u8; Control::FIXED_SIZE];
+    pkt.serialize(&mut buf)?;
 
-    // Allocate buffer
-    let mut buf = [0u8; ObservabilityAccess::FIXED_SIZE];
-    let bytes_written = pkt.serialize(&mut buf)?;
-    
-    assert_eq!(bytes_written, ObservabilityAccess::FIXED_SIZE);
-    // 'buf' is now ready to send
-    Ok(())
+    Ok(buf)
 }
-```
 
-### C. Deserialization
-Call the static `::deserialize()` method passing a byte slice:
+fn handle_incoming(buf: &[u8]) -> Result<(), ()> {
+    let header = PacketHeader::deserialize(buf)?;
 
-```rust
-use packets::ObservabilityAccess;
-
-fn handle_incoming_bytes(buf: &[u8]) {
-    match ObservabilityAccess::deserialize(buf) {
-        Ok(pkt) => {
-            println!("Parsed packet! Stage={}, Key={:?}", pkt.stage, pkt.access_key);
+    match header.op_code {
+        Control::OPCODE => {
+            let pkt = Control::deserialize(buf)?;
+            println!("Received Control: reason={}, type={}", pkt.reason, pkt.r#type);
         }
-        Err(_) => {
-            println!("Failed to deserialize packet (malformed or short buffer).");
+        _ => {
+            println!("Unknown OpCode: {:#06X}", header.op_code);
         }
     }
-}
-```
 
-### D. Variable-Size Packets (e.g., `Vec<u8>`)
-When a packet contains dynamic types (mapped as `Vec<u8>`), the serialized size changes dynamically. Ensure you allocate a larger buffer or a dynamic vector before serializing:
-
-```rust
-use packets::RuntimeObservation;
-
-fn serialize_variable_packet(observation_payload: Vec<u8>) -> Result<Vec<u8>, ()> {
-    let mut pkt = RuntimeObservation::default();
-    pkt.stage = 2;
-    pkt.observation_data = observation_payload; // Vec<u8>
-
-    // Allocate buffer with overhead space
-    let mut buf = vec![0u8; RuntimeObservation::FIXED_SIZE + pkt.observation_data.len()];
-    let bytes_written = pkt.serialize(&mut buf)?;
-    
-    // Truncate to size actually written
-    buf.truncate(bytes_written);
-    Ok(buf)
+    Ok(())
 }
 ```

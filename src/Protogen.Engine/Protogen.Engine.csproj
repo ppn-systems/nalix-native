@@ -13,7 +13,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Nalix.Protogen.Abstractions\Nalix.Protogen.Abstractions.csproj" />
+		<ProjectReference Include="..\Protogen.Core\Protogen.Core.csproj" />
 	</ItemGroup>
 
 </Project>

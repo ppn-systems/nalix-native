@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Protogen.Core/Protogen.Core.csproj" />
+  <Project Path="Protogen.Engine/Protogen.Engine.csproj" />
+  <Project Path="Protogen.Cli/Protogen.Cli.csproj" />
+</Solution>

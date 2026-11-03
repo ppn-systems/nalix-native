@@ -1,124 +1,141 @@
-# Nalix Protogen Specification & Type Mapping
+# Protogen Specification & Type Mapping
 
-This document details the serialization contract, C# packet definition rules, type mappings, and language binding specifications for the **Nalix Protogen** code generator.
+This document details the binary wire specification, type mappings, and packet definition rules for the **Protogen** code generator targeting **Nalix v14+**.
 
 ---
 
-## 1. Type Mapping Contract
+## 1. Nalix v14 Binary Wire Format
 
-To guarantee byte-level wire compatibility across platforms, C# types are mapped to specific unmanaged C and Rust types.
+All communication frames transmitted over the wire adhere to the Nalix v14 specification:
+
+```plaintext
++---------------------------------------------------------------------------------+
+|                                 Packet Header (6 Bytes)                         |
++------------------------+-------------------+--------------------+---------------+
+| OpCode (2 Bytes, LE)   | Flags (1 Byte)    | Priority (1 Byte)  | SeqId (2B, LE)|
++------------------------+-------------------+--------------------+---------------+
+|                                    Payload Data                                 |
++---------------------------------------------------------------------------------+
+```
+
+### Header Structure
+
+| Field | Type | Size | Endianness | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `OpCode` | `uint16_t` / `u16` | 2 bytes | Little-Endian | Static packet type identifier. |
+| `Flags` | `uint8_t` / `u8` | 1 byte | - | Packet control flags (e.g. Reliable, System). |
+| `Priority` | `uint8_t` / `u8` | 1 byte | - | Delivery priority level. |
+| `SequenceId` | `uint16_t` / `u16` | 2 bytes | Little-Endian | Packet tracking sequence counter. |
+
+> [!IMPORTANT]
+> Nalix v14 uses a 6-byte header with a 16-bit `OpCode`. The legacy 4-byte FNV-1a Magic Number from v12 has been completely deprecated and removed from the wire format.
+
+---
+
+## 2. Type Mapping Contract
+
+To guarantee byte-for-byte wire interoperability across .NET, C, and Rust runtimes, types map as follows:
 
 ### A. Primitive Types
 
-| C# Type | C Type | Rust Type | Size (Bytes) | Endianness |
+| C# Type | C Type (C99) | Rust Type | Size (Bytes) | Wire Encoding |
 | :--- | :--- | :--- | :--- | :--- |
-| `byte` | `uint8_t` | `u8` | 1 | - |
-| `sbyte` | `int8_t` | `i8` | 1 | - |
-| `bool` | `uint8_t` | `u8` | 1 | - |
-| `short` | `int16_t` | `i16` | 2 | Little-Endian |
-| `ushort` | `uint16_t` | `u16` | 2 | Little-Endian |
-| `int` | `int32_t` | `i32` | 4 | Little-Endian |
-| `uint` | `uint32_t` | `u32` | 4 | Little-Endian |
-| `long` | `int64_t` | `i64` | 8 | Little-Endian |
-| `ulong` | `uint64_t` | `u64` | 8 | Little-Endian |
-| `float` | `float` | `f32` | 4 | IEEE 754 |
-| `double` | `double` | `f64` | 8 | IEEE 754 |
+| `byte` | `uint8_t` | `u8` | 1 | Unsigned 8-bit |
+| `sbyte` | `int8_t` | `i8` | 1 | Signed 8-bit two's complement |
+| `bool` | `uint8_t` | `u8` | 1 | 0 = false, 1 = true |
+| `short` | `int16_t` | `i16` | 2 | Little-Endian signed 16-bit |
+| `ushort` | `uint16_t` | `u16` | 2 | Little-Endian unsigned 16-bit |
+| `int` | `int32_t` | `i32` | 4 | Little-Endian signed 32-bit |
+| `uint` | `uint32_t` | `u32` | 4 | Little-Endian unsigned 32-bit |
+| `long` | `int64_t` | `i64` | 8 | Little-Endian signed 64-bit |
+| `ulong` | `uint64_t` | `u64` | 8 | Little-Endian unsigned 64-bit |
+| `float` | `float` | `f32` | 4 | IEEE 754 single-precision float |
+| `double` | `double` | `f64` | 8 | IEEE 754 double-precision float |
+| `Enum` | Underlying type | Underlying type | 1, 2, 4, or 8 | Encoded as the underlying integral type |
 
 ### B. Special & Complex Types
 
-| C# Type | C Type | Rust Type | Size (Bytes) | Wire Layout |
+| C# Type | C Type | Rust Type | Size | Wire Layout |
 | :--- | :--- | :--- | :--- | :--- |
-| `Bytes32` | `Bytes32` | `[u8; 32]` | 32 | Raw byte array (`uint8_t[32]`) |
-| `PacketHeader` | `PacketHeader` | `PacketHeader` | 6 | Packed explicit struct layout (OpCode: 2, Flags: 1, Priority: 1, SequenceId: 2) |
-| `string` | `NalixString` | `Vec<u8>` | Variable | `[int32_t length][utf8_bytes]` |
+| `Bytes32` | `Bytes32` | `[u8; 32]` | 32 bytes | Continuous byte array (`uint8_t data[32]`) |
+| `PacketHeader` | `PacketHeader` | `PacketHeader` | 6 bytes | Packed struct: `OpCode: 2`, `Flags: 1`, `Priority: 1`, `SequenceId: 2` |
+| `string` | `NalixString` | `Vec<u8>` | 4 + N bytes | `[int32_t length][utf-8 bytes]` |
+| `ReadOnlyMemory<byte>` | `NalixString` | `Vec<u8>` | 4 + N bytes | `[int32_t length][raw bytes]` |
 
-#### String Wire Format
-Strings are encoded using the Nalix codec standard:
-* Length is written as a signed 32-bit integer (`int32_t`) in little-endian order.
-* A C# `null` string is serialized with length `-1` (no payload bytes).
-* An empty string `""` is serialized with length `0` (no payload bytes).
-* Non-empty strings are followed by their raw UTF-8 payload bytes.
-
----
-
-## 2. Unsupported C# Types
-
-The code generator excludes types without consistent unmanaged stack structures to prevent memory alignment and serialization mismatches:
-
-| Unsupported C# Type | Reason | Alternative Recommendation |
-| :--- | :--- | :--- |
-| `char` | C# `char` is UTF-16 (2 bytes), C/Rust `char` is UTF-8 (1 byte). | Use `byte` or `string` instead. |
-| `decimal` | Lacks native hardware CPU/FPU operations. | Use `double` or scale integers (fixed-point). |
-| `DateTime` | Platform/locale dependent serialization. | Use `long` (Ticks) or `ulong` (Unix epoch seconds). |
-| `Guid` | Complex layout and different formatting standards. | Use `Bytes16` or two `ulong` fields. |
-| `Nullable<T>` | Requires wrapper heap object allocations. | Use a sentinel value (e.g., `-1`, `0`, or `uint.MaxValue`). |
-| Arrays / lists | Dynamic heap references cannot be flat-serialized easily. | Use fixed-size fields or offsets. |
+#### Length-Prefixed Fields (Strings & Byte Arrays)
+* Wire representation begins with a signed 32-bit integer length prefix (`int32_t` in little-endian order).
+* `length = -1`: Indicates `null`. No payload bytes follow.
+* `length = 0`: Indicates empty string `""` or zero-length buffer. No payload bytes follow.
+* `length > 0`: Exactly `length` bytes follow.
+* In C, deserialization allocates heap memory via `malloc()`. The caller is responsible for freeing it with the generated `<packet>_free(&pkt)` function.
 
 ---
 
-## 3. Packet Definition Rules
+## 3. C# Packet Definition Guidelines
 
-C# classes serving as packet models must follow these structuring directives:
-* **Class Attributes:** Must decorate the class with `[Packet]`. The class must inherit `PacketBase<TSelf>`.
-* **Field Ordering:** Decided by indexing attributes:
-  * `[SerializeHeader(index)]`: Order of fields serialized in the packet header (written first).
-  * `[SerializeOrder(index)]`: Order of fields serialized in the packet payload body (written after header).
-* **Exclusion:** Decorate private or helper fields with `[SerializeIgnore]` to skip code generation.
+C# classes defining protocol messages must follow these rules:
 
-### Definition Example (C#)
+1. **Packet Identification:** Decorate the class with `[NalixPacket]` or `[Packet]`.
+2. **OpCode Definition:** Define the constant `StaticOpCode` or implement `IPacketStaticOpcode`:
+   ```csharp
+   public const ushort StaticOpCode = 0x0001;
+   ```
+3. **Base Class Inheritance:** Inherit `PacketBase<TSelf>`. Protogen detects this inheritance and automatically prepends `PacketHeader` at offset 0.
+4. **Field Ordering:** Decorate fields or properties with:
+   * `[SerializeHeader(n)]`: Serialized before payload fields.
+   * `[SerializeOrder(n)]`: Serialized sequentially by ascending index `n`.
+5. **Ignoring Fields:** Decorate non-serialized internal helpers with `[SerializeIgnore]`.
+
+### Example C# Definition
+
 ```csharp
 [Packet]
-public sealed class Handshake : PacketBase<Handshake>
+public sealed class Control : PacketBase<Control>, IPacketStaticOpcode
 {
-    [SerializeHeader(0)]
-    public PacketHeader _header;
+    public const ushort StaticOpCode = 0x0001;
 
     [SerializeOrder(0)]
-    public byte Stage;
+    public ushort Reason { get; set; }
 
     [SerializeOrder(1)]
-    public ushort Reason;
-
-    [SerializeOrder(2)]
-    public ulong SessionToken;
-
-    [SerializeOrder(3)]
-    public Bytes32 PublicKey;
+    public byte Type { get; set; }
 }
 ```
 
----
+### Generated C Output (`packets.h`)
 
-## 4. Generated Bindings Outputs
-
-### C Output (`packets.h`)
 ```c
-#if defined(_MSC_VER)
-    #pragma pack(push, 1)
-#endif
+#define PACKET_CONTROL_OPCODE 0x0001U
+#define CONTROL_SIZE 9
 
 typedef struct {
-    PacketHeader _header;
-    uint8_t Stage;
-    uint16_t Reason;
-    uint64_t SessionToken;
-    Bytes32 PublicKey;
-} Handshake;
+    PacketHeader header;
+    uint16_t reason;
+    uint8_t type;
+} Control;
 
-#if defined(_MSC_VER)
-    #pragma pack(pop)
-#endif
+void control_init(Control* pkt);
+size_t control_serialize(const Control* pkt, uint8_t* buffer, size_t buffer_size);
+size_t control_deserialize(Control* pkt, const uint8_t* buffer, size_t buffer_size);
 ```
 
-### Rust Output (`packets.rs`)
+### Generated Rust Output (`packets.rs`)
+
 ```rust
+/// Control - wire size: 9 bytes, opcode: 0x0001
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct Handshake {
-    pub _header: PacketHeader,
-    pub stage: u8,
+pub struct Control {
+    pub header: PacketHeader,
     pub reason: u16,
-    pub session_token: u64,
-    pub public_key: [u8; 32],
+    pub r#type: u8,
+}
+
+impl Control {
+    pub const FIXED_SIZE: usize = 9;
+    pub const OPCODE: u16 = 0x0001;
+
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, ()> { ... }
+    pub fn deserialize(buf: &[u8]) -> Result<Self, ()> { ... }
 }
 ```
