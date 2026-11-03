@@ -10,6 +10,7 @@ const SESSION_LABEL = new TextEncoder().encode('nalix-handshake/session');
 const SERVER_PROOF_LABEL = new TextEncoder().encode('nalix-handshake/server-proof');
 const CLIENT_PROOF_LABEL = new TextEncoder().encode('nalix-handshake/client-proof');
 const SERVER_FINISH_LABEL = new TextEncoder().encode('nalix-handshake/server-finish');
+const REKEY_LABEL = new TextEncoder().encode('nalix-session/rekey');
 
 /**
  * HKDF using HMAC-Keccak256 as specified in Nalix.Codec.Security.HandshakeX25519.
@@ -109,6 +110,14 @@ export class HandshakeX25519 {
     offset += 32;
     info.set(transcriptHash, offset);
     return this.hkdfExpand(masterSecret, info);
+  }
+
+  /**
+   * Derives a new session key during mid-session key rotation (Rekey).
+   * Matches Nalix.Codec.Security.HandshakeX25519.DeriveRekeySecret.
+   */
+  public static deriveRekeySecret(currentSecret: Uint8Array): Uint8Array {
+    return this.hkdfExpand(currentSecret, REKEY_LABEL);
   }
 }
 

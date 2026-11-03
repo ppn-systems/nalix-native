@@ -45,3 +45,54 @@ export enum ControlType {
   RESERVED1 = 0xFE,
   RESERVED2 = 0xFF,
 }
+
+/**
+ * Identifies the stage of a session management operation (SESSION_SIGNAL).
+ * Matches Nalix.Codec.ProtocolFrames.SessionResumeStage.
+ */
+export enum SessionResumeStage {
+  NONE = 0x00,
+  REQUEST = 0x01,
+  RESPONSE = 0x02,
+}
+
+/**
+ * Standard protocol reason codes for control and error packets.
+ * Matches Nalix.Abstractions.Networking.Protocols.ProtocolReason.
+ */
+export enum ProtocolReason {
+  NONE = 0,
+  UNKNOWN = 1,
+  CANCELLED = 2,
+  NOT_IMPLEMENTED = 3,
+  TEMPORARY_FAILURE = 4,
+  DEPRECATED = 5,
+  REQUEST_INVALID = 6,
+  INTERNAL_ERROR = 7,
+
+  TIMEOUT = 100,
+  REMOTE_CLOSED = 101,
+  LOCAL_CLOSED = 102,
+  NETWORK_ERROR = 103,
+  CONNECTION_REFUSED = 104,
+  CONNECTION_RESET = 105,
+  DNS_FAILURE = 106,
+  MTU_VIOLATION = 107,
+
+  STATE_VIOLATION = 157,
+  CRYPTO_UNSUPPORTED = 158,
+  COMPRESSION_UNSUPPORTED = 159,
+  OPERATION_UNSUPPORTED = 160,
+  MALFORMED_PACKET = 161,
+
+  UNAUTHENTICATED = 200,
+  UNAUTHORIZED = 201,
+  FORBIDDEN = 202,
+  TOKEN_EXPIRED = 208,
+  TOKEN_REVOKED = 209,
+
+  CLIENT_QUIT = 500,
+  ABORTED = 501,
+  LOCAL_POLICY = 503,
+  SESSION_NOT_FOUND = 550,
+}

@@ -1,17 +1,25 @@
 import { ChannelConfig, ConnectivityState } from './channel.js';
 import { Packet, PacketCreateOptions, PayloadLike, PacketFlags, PacketPriority } from './packet.js';
-import { ControlType, ProtocolOpCode } from './protocol.js';
+import { ControlType, ProtocolOpCode, ProtocolReason } from './protocol.js';
 import { NalixStatus, StatusCode } from './status.js';
 import { SessionState } from './state.js';
 import { Subscription, PacketCallback, StateCallback, SubscriptionManager } from './subscription.js';
 import { PendingRequestManager, RequestOptions } from './pending.js';
 import { FramePipeline } from './pipeline.js';
-import { performHandshake, HandshakeOptions, HandshakeResult } from './handshake.js';
+import { performHandshake, HandshakeOptions, HandshakeResult, HandshakeX25519 } from './handshake.js';
+import {
+  resumeSession,
+  connectWithResume,
+  hasResumeState,
+  ResumeOptions,
+  ConnectWithResumeOptions,
+  ConnectWithResumeResult,
+} from './resume.js';
 
 /**
  * Common abstraction contract for client-side transport sessions.
  * Adheres to Interface Segregation Principle (ISP) and Liskov Substitution Principle (LSP).
- * Matches Nalix.SDK.Transport.ITransportSession.
+ * Matches Nalix.SDK.Transport.ITransportSession and C# Transport Extensions.
  */
 export interface ITransportSession {
   readonly config: ChannelConfig;
@@ -19,6 +27,7 @@ export interface ITransportSession {
   readonly isConnected: boolean;
   readonly isEncrypted: boolean;
   readonly sessionState: SessionState;
+  readonly hasResumeState: boolean;
 
   connect(): Promise<void>;
   disconnect(): Promise<void>;
@@ -42,6 +51,13 @@ export interface ITransportSession {
   enableEncryption(secret?: Uint8Array): void;
   disableEncryption(): void;
   handshake(options?: HandshakeOptions): Promise<HandshakeResult>;
+
+  // Session Resumption and Transport Extensions matching C#
+  resumeSession(options?: ResumeOptions): Promise<ProtocolReason>;
+  connectWithResume(options?: ConnectWithResumeOptions): Promise<ConnectWithResumeResult>;
+  rekey(timeoutMs?: number): Promise<void>;
+  disconnectGracefully(reason?: ProtocolReason): Promise<void>;
+  sendControl(type: ControlType, reason?: ProtocolReason, sequenceId?: number): number;
 }
 
 /**
@@ -76,6 +92,10 @@ export abstract class TransportSession implements ITransportSession {
 
   public get sessionState(): SessionState {
     return this._sessionState;
+  }
+
+  public get hasResumeState(): boolean {
+    return hasResumeState(this._sessionState);
   }
 
   /**
@@ -285,7 +305,7 @@ export abstract class TransportSession implements ITransportSession {
    * Measures network round-trip time (RTT) by sending a SYSTEM_TIMESYNC PING packet and awaiting PONG.
    * Matches Nalix C# PingExtensions.PingAsync.
    */
-  public async ping(timeoutMs: number = 5000): Promise<number> {
+  public async ping(timeoutMs: number = 3000): Promise<number> {
     const start = performance.now();
     const payload = new Uint8Array(17);
     const view = new DataView(payload.buffer);
@@ -361,5 +381,91 @@ export abstract class TransportSession implements ITransportSession {
    */
   public async handshake(options?: HandshakeOptions): Promise<HandshakeResult> {
     return performHandshake(this, options);
+  }
+
+  /**
+   * Resumes an existing authenticated session state.
+   * Matches Nalix C# ResumeExtensions.ResumeSessionAsync.
+   */
+  public async resumeSession(options?: ResumeOptions): Promise<ProtocolReason> {
+    return resumeSession(this, options);
+  }
+
+  /**
+   * Connects and attempts session resume, falling back to full handshake when allowed.
+   * Matches Nalix C# ResumeExtensions.ConnectWithResumeDetailedAsync.
+   */
+  public async connectWithResume(options?: ConnectWithResumeOptions): Promise<ConnectWithResumeResult> {
+    return connectWithResume(this, options);
+  }
+
+  /**
+   * Rotates session encryption keys mid-session using HKDF ratcheting.
+   * Matches Nalix C# RekeyExtensions.RekeyAsync.
+   */
+  public async rekey(timeoutMs: number = 5000): Promise<void> {
+    if (!this.isConnected) {
+      throw new NalixStatus(StatusCode.UNAVAILABLE, 'Session must be connected to perform rekey');
+    }
+    if (!this._sessionState.secret) {
+      throw new NalixStatus(StatusCode.FAILED_PRECONDITION, 'No active session secret to rotate');
+    }
+
+    const newKey = HandshakeX25519.deriveRekeySecret(this._sessionState.secret);
+    const seqId = this.nextSequenceId();
+
+    const payload = new Uint8Array(3);
+    const view = new DataView(payload.buffer);
+    view.setUint16(0, ProtocolReason.NONE, true);
+    payload[2] = ControlType.SESSION_REKEY;
+
+    const rekeyPacket = Packet.create(ProtocolOpCode.SYSTEM_CONTROL, payload, {
+      flags: PacketFlags.SYSTEM,
+      priority: PacketPriority.HIGH,
+      sequenceId: seqId,
+    });
+
+    await this.request(rekeyPacket, {
+      timeoutMs,
+      encrypt: false,
+      sequenceId: seqId,
+      predicate: (incoming) =>
+        incoming.header.opcode === ProtocolOpCode.SYSTEM_CONTROL &&
+        incoming.payload.length >= 3 &&
+        incoming.payload[2] === ControlType.SESSION_REKEY_ACK &&
+        incoming.header.sequenceId === seqId,
+    });
+
+    this._sessionState.secret = newKey;
+  }
+
+  /**
+   * Sends a DISCONNECT control frame and gracefully disconnects the session.
+   * Matches Nalix C# DisconnectExtensions.DisconnectGracefullyAsync.
+   */
+  public async disconnectGracefully(reason: ProtocolReason = ProtocolReason.NONE): Promise<void> {
+    if (this.isConnected) {
+      try {
+        this.sendControl(ControlType.DISCONNECT, reason);
+      } catch {}
+      await this.disconnect();
+    }
+  }
+
+  /**
+   * Fluent helper to send a SYSTEM_CONTROL frame.
+   * Matches Nalix C# ControlExtensions.SendControlAsync.
+   */
+  public sendControl(type: ControlType, reason: ProtocolReason = ProtocolReason.NONE, sequenceId?: number): number {
+    const payload = new Uint8Array(3);
+    const view = new DataView(payload.buffer);
+    view.setUint16(0, reason, true);
+    payload[2] = type;
+
+    return this.send(ProtocolOpCode.SYSTEM_CONTROL, payload, {
+      flags: PacketFlags.SYSTEM,
+      priority: PacketPriority.HIGH,
+      sequenceId,
+    });
   }
 }

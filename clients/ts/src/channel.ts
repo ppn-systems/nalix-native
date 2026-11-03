@@ -33,6 +33,9 @@ export interface ChannelConfigOptions {
   algorithm?: CipherSuiteType;
   serverPublicKey?: Uint8Array;
   allowTofu?: boolean;
+  resumeEnabled?: boolean;
+  resumeTimeoutMs?: number;
+  resumeFallbackToHandshake?: boolean;
 }
 
 export class ChannelConfig {
@@ -53,6 +56,9 @@ export class ChannelConfig {
   public readonly algorithm: CipherSuiteType;
   public readonly serverPublicKey?: Uint8Array;
   public readonly allowTofu: boolean;
+  public readonly resumeEnabled: boolean;
+  public readonly resumeTimeoutMs: number;
+  public readonly resumeFallbackToHandshake: boolean;
   private readonly _overrideUrl?: string;
 
   constructor(options: ChannelConfigOptions | string) {
@@ -83,6 +89,9 @@ export class ChannelConfig {
       this.algorithm = CipherSuiteType.Chacha20Poly1305;
       this.serverPublicKey = undefined;
       this.allowTofu = true;
+      this.resumeEnabled = true;
+      this.resumeTimeoutMs = 3000;
+      this.resumeFallbackToHandshake = true;
     } else {
       if (options.url) {
         this._overrideUrl = options.url;
@@ -118,6 +127,9 @@ export class ChannelConfig {
       this.algorithm = options.algorithm ?? CipherSuiteType.Chacha20Poly1305;
       this.serverPublicKey = options.serverPublicKey;
       this.allowTofu = options.allowTofu ?? true;
+      this.resumeEnabled = options.resumeEnabled ?? true;
+      this.resumeTimeoutMs = options.resumeTimeoutMs ?? 3000;
+      this.resumeFallbackToHandshake = options.resumeFallbackToHandshake ?? true;
     }
   }
 
