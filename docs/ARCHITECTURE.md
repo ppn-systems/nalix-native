@@ -15,7 +15,6 @@ graph TD
     subgraph Core ["Domain Core (Protogen.Core)"]
         Contracts["Contracts: IContractAnalyzer, ICodeGenerator"]
         DomainModels["Models: PacketSchema, FieldSchema, GeneratedFile"]
-        Validation["Validation: ISchemaValidator, SchemaValidator, SchemaDiagnostic"]
         Constants["Constants: ProtocolConstants, ContractMetadata"]
     end
 
@@ -46,9 +45,6 @@ The domain layer encapsulates all business logic, invariant verification, and da
 - **Contracts:**
   - `IContractAnalyzer`: Abstraction for parsing packet contracts from source trees or binaries.
   - `ICodeGenerator`: Abstraction for rendering target language source code from an immutable list of `PacketSchema`.
-- **Validation:**
-  - `ISchemaValidator` / `SchemaValidator`: Enforces protocol invariants and language-specific constraints prior to code generation.
-  - `SchemaDiagnostic`: Encapsulates structured diagnostic messages with severity levels (`Information`, `Warning`, `Error`) and rule identifiers.
 - **Constants:**
   - `ProtocolConstants`: Defines fundamental wire protocol characteristics, such as the 6-byte header size and primitive type byte counts.
   - `ContractMetadata`: String identifiers for contract attributes (`[NalixPacket]`, `[Packet]`, `[SerializeOrder]`, `[SerializeHeader]`).
@@ -68,10 +64,9 @@ The engine layer implements domain contracts for analysis and code generation.
 
 ### 2.3 Presentation Layer (`Protogen.Cli`)
 
-The CLI layer is responsible for input validation, execution orchestration, diagnostic reporting, and process exit codes:
+The CLI layer is responsible for argument parsing, execution orchestration, and process return codes:
 - Parses command-line arguments.
 - Instantiates the chosen `IContractAnalyzer`.
-- Executes `SchemaValidator` and outputs structured diagnostics.
 - Coordinates target `ICodeGenerator` instances and writes generated files to disk.
 
 ---
@@ -80,12 +75,11 @@ The CLI layer is responsible for input validation, execution orchestration, diag
 
 ### 3.1 Single Responsibility Principle (SRP)
 - `IContractAnalyzer` implementations only extract metadata into domain models.
-- `ISchemaValidator` only inspects domain models for protocol rule violations.
 - `ICodeGenerator` implementations only transform domain models into target language source strings.
 - `Protogen.Cli` only manages process input, output, and process return codes.
 
 ### 3.2 Open/Closed Principle (OCP)
-The code generation pipeline is open for extension but closed for modification. Adding a new target language (e.g., Go, Python, Swift) requires implementing `ICodeGenerator` without modifying existing analyzers, validators, or CLI execution flow.
+The code generation pipeline is open for extension but closed for modification. Adding a new target language (e.g., Go, Python, Swift) requires implementing `ICodeGenerator` without modifying existing analyzers or CLI execution flow.
 
 ### 3.3 Liskov Substitution Principle (LSP)
 Both `RoslynProjectAnalyzer` and `ReflectionAssemblyAnalyzer` implement `IContractAnalyzer`. They are fully interchangeable and yield identical `PacketSchema` representations from identical contract definitions.
@@ -94,7 +88,6 @@ Both `RoslynProjectAnalyzer` and `ReflectionAssemblyAnalyzer` implement `IContra
 Interfaces are narrowly defined:
 - `IContractAnalyzer`: Single asynchronous method `AnalyzeAsync(string targetPath, CancellationToken ct)`.
 - `ICodeGenerator`: Single method `Generate(IReadOnlyList<PacketSchema> packets)`.
-- `ISchemaValidator`: Single method `Validate(IReadOnlyList<PacketSchema> packets)`.
 
 ### 3.5 Dependency Inversion Principle (DIP)
 High-level modules (the CLI runner) and low-level modules (the generators and analyzers) depend entirely on abstractions defined in `Protogen.Core`, ensuring zero cyclic dependencies and clean testability.
@@ -107,7 +100,6 @@ High-level modules (the CLI runner) and low-level modules (the generators and an
 sequenceDiagram
     participant CLI as Protogen.Cli
     participant Analyzer as IContractAnalyzer
-    participant Validator as ISchemaValidator
     participant Generator as ICodeGenerator
     participant Disk as File System
 
@@ -116,37 +108,14 @@ sequenceDiagram
     Analyzer->>Analyzer: Extract StaticOpCode & [SerializeOrder] fields
     Analyzer-->>CLI: IReadOnlyList<PacketSchema>
     
-    CLI->>Validator: Validate(packets)
-    Validator-->>CLI: ValidationResult (Diagnostics, IsValid)
-    
-    alt Validation Failed (Errors detected or --strict enabled)
-        CLI-->>Disk: Abort execution (Exit Code 2)
-    else Validation Succeeded
-        CLI->>Generator: Generate(packets)
-        Generator-->>CLI: IReadOnlyList<GeneratedFile>
-        CLI->>Disk: Write files to output directories
-    end
+    CLI->>Generator: Generate(packets)
+    Generator-->>CLI: IReadOnlyList<GeneratedFile>
+    CLI->>Disk: Write files to output directories
 ```
 
 ---
 
-## 5. Schema Validation Engine
-
-The `SchemaValidator` enforces the following rules prior to code emission:
-
-| Rule Code | Severity | Description | Action |
-| :--- | :--- | :--- | :--- |
-| `PG001` | Error | Duplicate OpCode detected across distinct packet types. | Aborts generation. |
-| `PG002` | Warning | Packet OpCode is `0x0000` (reserved or uninitialized). | Logs warning. |
-| `PG003` | Error | Duplicate `[SerializeOrder]` index within the same packet. | Aborts generation. |
-| `PG004` | Information | Packet defines no payload fields. | Logs informational notice. |
-| `PG005` | Error | Case-insensitive packet name collision (clashes in C). | Aborts generation. |
-| `PG006` | Warning | Field name matches an ANSI C reserved keyword. | Logs warning. |
-| `PG007` | Warning | Packet wire size exceeds 65535 bytes (MTU threshold). | Logs warning. |
-
----
-
-## 6. Architecture & Implementation Decisions
+## 5. Architecture & Implementation Decisions
 
 ### 6.1 Decoupling from Nalix Packages
 Protogen does not reference `Nalix.Codec` or `Nalix.Abstractions` directly. Contract analysis relies on string metadata matching defined in `ContractMetadata`. This ensures the code generator remains functional across Nalix major versions without assembly binding redirects or package lock conflicts.

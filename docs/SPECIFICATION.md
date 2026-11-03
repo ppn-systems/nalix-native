@@ -100,7 +100,7 @@ C# packet contract declarations must satisfy the following criteria:
 1. **Type Decoration:** The class must be decorated with `[NalixPacket]` or `[Packet]`.
 2. **OpCode Declaration:** The class must expose `public const ushort StaticOpCode = 0xXXXX;` or implement `IPacketStaticOpcode`.
 3. **Base Class:** If the class inherits `PacketBase<TSelf>`, Protogen automatically injects `PacketHeader` at index `0`.
-4. **Field Ordering:** All serialized fields must be decorated with `[SerializeOrder(n)]` or `[SerializeHeader(n)]` where `n` is an integer index. Duplicate indices within the same packet cause validation failure (`PG003`).
+4. **Field Ordering:** All serialized fields must be decorated with `[SerializeOrder(n)]` or `[SerializeHeader(n)]` where `n` is an integer index. Duplicate indices within the same packet must not be used.
 5. **Field Exclusions:** Fields decorated with `[SerializeIgnore]` or standard non-serialized members are omitted from wire schemas.
 
 ### 4.1 Example Contract

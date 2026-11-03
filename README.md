@@ -24,7 +24,6 @@ Protogen operates as an unmanaged code generator targeting embedded and native e
 - **Alignment Safety:** Generates sequential bitshift decoding routines for non-aligned memory access environments (e.g., Xtensa, RISC-V, ARM Cortex-M).
 - **Multi-Compiler Packing:** Emits compilation guards for GCC/Clang (`__attribute__((packed))` and `#pragma pack(push, 1)`) and MSVC.
 - **Standalone Analysis:** Does not require runtime references or project dependencies to Nalix assemblies. Parses contracts via Roslyn compilation workspaces or reflection metadata.
-- **Schema Validation:** Enforces strict domain rules including opcode uniqueness, field ordering determinism, and identifier safety.
 
 ---
 
@@ -34,18 +33,17 @@ The solution adheres to clean architecture boundaries:
 
 ```plaintext
 src/
-├── Protogen.Core/        # Domain models, protocol constants, and validator contracts
+├── Protogen.Core/        # Domain models, contracts, and protocol constants
 │   ├── Constants/        # ProtocolConstants, ContractMetadata
 │   ├── Models/           # PacketSchema, FieldSchema, GeneratedFile
-│   ├── Contracts/        # IContractAnalyzer, ICodeGenerator, GenerationContext
-│   └── Validation/       # SchemaValidator, ISchemaValidator, SchemaDiagnostic
+│   └── Contracts/        # IContractAnalyzer, ICodeGenerator, GenerationContext
 │
 ├── Protogen.Engine/      # Analysis and generation implementations
 │   ├── Analysis/         # RoslynProjectAnalyzer, ReflectionAssemblyAnalyzer, TypeResolver
 │   └── Generators/       # CGenerator, RustGenerator
 │
 ├── Protogen.Cli/         # Command-line interface
-│   └── Program.cs        # CLI entry point, argument parsing, error codes
+│   └── Program.cs        # CLI entry point, argument parsing
 │
 tests/
 └── Protogen.Tests/       # Unit and regression test suite
@@ -89,18 +87,8 @@ protogen --assembly <path-to-dll> --c-out <dir> [--rust-out <dir>] [options]
 | `--assembly` | `-a` | Path to the compiled C# `.dll` containing packet contract metadata. |
 | `--c-out` | | Output directory for C headers and source (`packets.h`, `packets.c`, `packet_test.c`). |
 | `--rust-out` | | Output directory for Rust source files (`packets.rs`, `packets_tests.rs`). |
-| `--strict` | | Treat validation warnings as errors and abort execution. |
 | `--verbose` | `-v` | Enable verbose diagnostic logging and stack traces. |
 | `--help` | `-h` | Display command-line options and usage syntax. |
-
-### Exit Codes
-
-| Code | Name | Description |
-| :--- | :--- | :--- |
-| `0` | Success | Schema validation and code generation succeeded. |
-| `1` | General Error | Unhandled runtime exception or I/O failure. |
-| `2` | Validation Error | Schema validation failed (e.g., duplicate OpCodes, field order collisions). |
-| `64` | Usage Error | Invalid command-line arguments or syntax. |
 
 ---
 
