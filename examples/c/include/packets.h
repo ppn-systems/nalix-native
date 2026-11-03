@@ -14,7 +14,6 @@ typedef struct { uint8_t data[32]; } Bytes32;
 // Length-prefixed UTF-8 string (matches Nalix codec wire format)
 // null = length -1, empty = length 0, otherwise [int32_t length][utf8 bytes]
 typedef struct { int32_t length; uint8_t* data; } NalixString;
-void nalix_string_free(NalixString* s);
 
 // Nalix v14 standard 6-byte packet header
 #define PACKET_HEADER_SIZE 6
@@ -33,6 +32,14 @@ typedef struct {
 #if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
     #pragma pack(pop)
 #endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void nalix_string_free(NalixString* s);
+size_t packet_header_serialize(const PacketHeader* header, uint8_t* buf, size_t buf_size);
+size_t packet_header_deserialize(PacketHeader* header, const uint8_t* buf, size_t buf_size);
 
 // Control — 9 bytes, opcode 0x0001
 #define PACKET_CONTROL_OPCODE 0x0001U
@@ -299,3 +306,6 @@ size_t timesync_serialize(const TimeSync* pkt, uint8_t* buf, size_t buf_size);
 size_t timesync_deserialize(TimeSync* pkt, const uint8_t* buf, size_t buf_size);
 bool timesync_equals(const TimeSync* a, const TimeSync* b);
 
+#ifdef __cplusplus
+}
+#endif

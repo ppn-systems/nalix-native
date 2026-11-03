@@ -1,103 +1,112 @@
-# ⚡ Protogen
+# Protogen
 
-[![GitHub repository](https://img.shields.io/badge/GitHub-ppn--systems%2Fprotogen-blue?logo=github)](https://github.com/ppn-systems/protogen)
-[![.NET 10.0](https://img.shields.io/badge/.NET-10.0-blueviolet?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com)
-[![License](https://img.shields.io/badge/License-Apache_2.0-orange?logo=apache)](LICENSE)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/ppn-systems/protogen)
+[![Target Runtime](https://img.shields.io/badge/.NET-10.0-blue)](https://dotnet.microsoft.com)
+[![License](https://img.shields.io/badge/license-Apache_2.0-blue)](LICENSE)
 
-A high-performance, cross-platform code generator that parses C# packet definitions and emits native, zero-dependency **C (C99 / ESP-IDF / Arduino)** and **Rust** bindings matching the **Nalix v14+** binary wire protocol.
-
----
-
-## 🗺️ Documentation Index
-
-* **📐 [Architecture & Pipeline](docs/ARCHITECTURE.md):** Domain-Driven Design (DDD), SOLID architecture, Roslyn/Reflection analysis, and generator pipelines.
-* **📋 [Serialization & Wire Specification](docs/SPECIFICATION.md):** Nalix v14 6-byte header, opcode discovery, primitive/complex type mappings, and memory layout rules.
-* **🔌 [Integration Guide (ESP32 & Microcontrollers)](docs/INTEGRATION.md):** Complete guide for ESP-IDF, FreeRTOS, Arduino, and embedded C/Rust clients.
+Protogen is a cross-platform protocol code generator that converts C# binary packet contracts into native C (C99, ESP-IDF, FreeRTOS) and Rust data structures matching the Nalix v14 wire protocol.
 
 ---
 
-## ✨ Key Features
+## Documentation Index
 
-* **Strict Nalix v14 Wire Compatibility:** Standard 6-byte header (`OpCode: uint16`, `Flags: uint8`, `Priority: uint8`, `SequenceId: uint16`), little-endian integers, IEEE 754 floats, and length-prefixed strings.
-* **Microcontroller-Safe (ESP32 / ESP8266 / ARM Cortex-M):** Alignment-safe sequential bitshift decoding and `memcpy` serialization, preventing unaligned memory access exceptions on Xtensa and RISC-V cores.
-* **Cross-Compiler Packing:** Supports GCC, Clang (`__attribute__((packed))`), and MSVC (`#pragma pack(push, 1)`).
-* **Zero External Dependencies:** Standalone engine requiring no runtime `<ProjectReference>` to Nalix or third-party serialization libraries.
-* **Dual Contract Analysis:** Analyzes raw source code projects (`.csproj` via Roslyn Semantic Model) or compiled assemblies (`.dll` via Reflection metadata).
-* **Automated Verification:** Generates self-contained round-trip test suites for both C (`gcc -Wall -Wextra`) and Rust (`cargo test`).
+- [Architecture Specification](docs/ARCHITECTURE.md): Domain-Driven Design (DDD), SOLID architecture, Roslyn and Reflection analysis pipelines.
+- [Wire Protocol & Type Specification](docs/SPECIFICATION.md): Nalix v14 6-byte header, opcode discovery, primitive and complex type mappings.
+- [Integration Guide](docs/INTEGRATION.md): Integration patterns for ESP-IDF, Arduino, FreeRTOS, and Rust services.
 
 ---
 
-## 📐 Project Architecture (DDD & SOLID)
+## System Overview
 
-Protogen is structured into three clean, decoupled layers adhering to Domain-Driven Design (DDD) and SOLID principles:
+Protogen operates as an unmanaged code generator targeting embedded and native environments:
+
+- **Wire Compatibility:** Emits binary layouts matching Nalix v14 (6-byte header consisting of OpCode, Flags, Priority, and SequenceId; Little-Endian byte order; length-prefixed strings).
+- **Alignment Safety:** Generates sequential bitshift decoding routines for non-aligned memory access environments (e.g., Xtensa, RISC-V, ARM Cortex-M).
+- **Multi-Compiler Packing:** Emits compilation guards for GCC/Clang (`__attribute__((packed))` and `#pragma pack(push, 1)`) and MSVC.
+- **Standalone Analysis:** Does not require runtime references or project dependencies to Nalix assemblies. Parses contracts via Roslyn compilation workspaces or reflection metadata.
+- **Schema Validation:** Enforces strict domain rules including opcode uniqueness, field ordering determinism, and identifier safety.
+
+---
+
+## Project Structure
+
+The solution adheres to clean architecture boundaries:
 
 ```plaintext
 src/
-├── Protogen.Core/        # Domain Models, Constants & Contracts (Zero dependencies)
+├── Protogen.Core/        # Domain models, protocol constants, and validator contracts
 │   ├── Constants/        # ProtocolConstants, ContractMetadata
 │   ├── Models/           # PacketSchema, FieldSchema, GeneratedFile
-│   └── Contracts/        # IContractAnalyzer, ICodeGenerator, GenerationContext
+│   ├── Contracts/        # IContractAnalyzer, ICodeGenerator, GenerationContext
+│   └── Validation/       # SchemaValidator, ISchemaValidator, SchemaDiagnostic
 │
-├── Protogen.Engine/      # Infrastructure & Implementation Engine
+├── Protogen.Engine/      # Analysis and generation implementations
 │   ├── Analysis/         # RoslynProjectAnalyzer, ReflectionAssemblyAnalyzer, TypeResolver
-│   └── Generators/       # CGenerator (C99 / ESP-IDF), RustGenerator
+│   └── Generators/       # CGenerator, RustGenerator
 │
-└── Protogen.Cli/         # Presentation Layer (Console Application)
-    └── Program.cs        # CLI parser and execution orchestration
+├── Protogen.Cli/         # Command-line interface
+│   └── Program.cs        # CLI entry point, argument parsing, error codes
+│
+tests/
+└── Protogen.Tests/       # Unit and regression test suite
 ```
 
 ---
 
-## 🛠️ Build & Installation
+## Compilation
 
-Build the native compiler CLI tool using the .NET 10.0 SDK:
+Prerequisites: .NET 10.0 SDK.
 
 ```bash
-# Build the entire solution
+# Build the solution in Release configuration
 dotnet build src/Protogen.slnx -c Release
 
-# Publish the standalone CLI executable to bin/
+# Run automated tests
+dotnet test src/Protogen.slnx -c Release
+
+# Publish standalone executable
 dotnet publish src/Protogen.Cli/Protogen.Cli.csproj -c Release -o bin/
 ```
 
-The resulting `protogen` (or `protogen.exe` on Windows) executable is generated in `./bin`.
+The resulting CLI binary is emitted to `bin/protogen` (`bin/protogen.exe` on Windows).
 
 ---
 
-## 💻 CLI Usage
+## Command-Line Interface
+
+### Syntax
 
 ```bash
-# General CLI Command Syntax
 protogen --project <path-to-csproj> --c-out <dir> [--rust-out <dir>] [options]
 protogen --assembly <path-to-dll> --c-out <dir> [--rust-out <dir>] [options]
 ```
 
-### Options & Flags
+### Options
 
-| Flag | Long Flag | Description |
+| Option | Short | Description |
 | :--- | :--- | :--- |
-| `-p` | `--project` | Path to the C# `.csproj` containing packet contract source files. |
-| `-a` | `--assembly` | Path to the compiled C# `.dll` containing packet contract metadata. |
-| | `--c-out` | Output directory for C headers and source (`packets.h`, `packets.c`, `packet_test.c`). |
-| | `--rust-out` | Output directory for Rust modules (`packets.rs`, `packets_tests.rs`). |
-| `-v` | `--verbose` | Enable verbose error logging and stack traces. |
-| `-h` | `--help` | Display CLI help documentation. |
+| `--project` | `-p` | Path to the C# `.csproj` containing packet contract source files. |
+| `--assembly` | `-a` | Path to the compiled C# `.dll` containing packet contract metadata. |
+| `--c-out` | | Output directory for C headers and source (`packets.h`, `packets.c`, `packet_test.c`). |
+| `--rust-out` | | Output directory for Rust source files (`packets.rs`, `packets_tests.rs`). |
+| `--strict` | | Treat validation warnings as errors and abort execution. |
+| `--verbose` | `-v` | Enable verbose diagnostic logging and stack traces. |
+| `--help` | `-h` | Display command-line options and usage syntax. |
 
-### Practical Examples
+### Exit Codes
 
-```bash
-# Generate C (ESP32/C99) and Rust bindings from a compiled assembly
-protogen -a samples/Nalix.Codec.dll --c-out ./examples/c --rust-out ./examples/rust
-
-# Generate C-only bindings from a C# source project
-protogen -p ../Nalix.Codec/Nalix.Codec.csproj --c-out ./firmware/esp32/protocol
-```
+| Code | Name | Description |
+| :--- | :--- | :--- |
+| `0` | Success | Schema validation and code generation succeeded. |
+| `1` | General Error | Unhandled runtime exception or I/O failure. |
+| `2` | Validation Error | Schema validation failed (e.g., duplicate OpCodes, field order collisions). |
+| `64` | Usage Error | Invalid command-line arguments or syntax. |
 
 ---
 
-## 🧪 Testing the Generated Code
+## Verification
 
-### C Test Suite (GCC / Clang)
+### C Test Suite
 
 ```bash
 cd examples/c
@@ -105,7 +114,7 @@ gcc -Wall -Wextra -Iinclude src/packets.c tests/packet_test.c -o packet_test
 ./packet_test
 ```
 
-### Rust Test Suite (Cargo)
+### Rust Test Suite
 
 ```bash
 cd examples/rust
@@ -114,6 +123,6 @@ cargo test
 
 ---
 
-## ⚖️ License
+## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for details.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.

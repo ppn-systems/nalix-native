@@ -6,6 +6,28 @@ void nalix_string_free(NalixString* s) {
     if (s && s->data) { free(s->data); s->data = NULL; s->length = 0; }
 }
 
+size_t packet_header_serialize(const PacketHeader* header, uint8_t* buf, size_t buf_size)
+{
+    if (!header || !buf || buf_size < PACKET_HEADER_SIZE) return 0;
+    buf[0] = (uint8_t)(header->OpCode & 0xFF);
+    buf[1] = (uint8_t)((header->OpCode >> 8) & 0xFF);
+    buf[2] = header->Flags;
+    buf[3] = header->Priority;
+    buf[4] = (uint8_t)(header->SequenceId & 0xFF);
+    buf[5] = (uint8_t)((header->SequenceId >> 8) & 0xFF);
+    return PACKET_HEADER_SIZE;
+}
+
+size_t packet_header_deserialize(PacketHeader* header, const uint8_t* buf, size_t buf_size)
+{
+    if (!header || !buf || buf_size < PACKET_HEADER_SIZE) return 0;
+    header->OpCode = (uint16_t)(buf[0] | ((uint16_t)buf[1] << 8));
+    header->Flags = buf[2];
+    header->Priority = buf[3];
+    header->SequenceId = (uint16_t)(buf[4] | ((uint16_t)buf[5] << 8));
+    return PACKET_HEADER_SIZE;
+}
+
 void control_init(Control* pkt)
 {
     if (!pkt) return;

@@ -1,27 +1,23 @@
-# Protogen Integration Guide (ESP32, Microcontrollers & Rust)
-
-This guide walks you through integrating Protogen-generated **C** and **Rust** protocol code into embedded targets (ESP32, ESP8266, STM32, Arduino) and native servers.
-
----
+# Protogen Integration Guide
 
 ## 1. Embedded C & ESP-IDF Integration
 
-The generated C code complies with ANSI C99, requires only standard C headers (`<stdint.h>`, `<stddef.h>`, `<string.h>`, `<stdlib.h>`), and has zero external library dependencies.
+The generated C output complies with ANSI C99 and standard library requirements (`<stdint.h>`, `<stddef.h>`, `<stdbool.h>`, `<string.h>`, `<stdlib.h>`). It requires no third-party libraries or external dependencies.
 
-### A. ESP-IDF Component Structure
+### 1.1 Project Layout (ESP-IDF)
 
-Place the generated files into an ESP-IDF component or your `main` directory:
+Place the generated source files within a component directory or in the `main` directory of your ESP-IDF firmware project:
 
 ```plaintext
-my_esp32_project/
+esp32_firmware/
 ├── CMakeLists.txt
 └── main/
     ├── CMakeLists.txt
     ├── main.c
     ├── include/
-    │   └── packets.h         <-- Generated C header
+    │   └── packets.h         # Generated C header
     └── src/
-        └── packets.c         <-- Generated C implementation
+        └── packets.c         # Generated C implementation
 ```
 
 #### `main/CMakeLists.txt`
@@ -34,9 +30,9 @@ idf_component_register(
 
 ---
 
-### B. Sending a Packet (Serialization)
+### 1.2 Packet Transmission (Serialization)
 
-Use the `<packet>_init()` function to initialize the struct and assign its default `OpCode`. Then fill the payload fields and serialize:
+Use the generated `<packet>_init()` function to initialize the packet structure and set its default `OpCode`.
 
 ```c
 #include "packets.h"
@@ -48,63 +44,59 @@ static const char *TAG = "NET_CLIENT";
 void send_control_packet(int socket_fd)
 {
     Control pkt;
-    // 1. Initialize struct and assign pkt.header.op_code = PACKET_CONTROL_OPCODE
+    // Initializes memory to zero and assigns pkt.Header.OpCode = PACKET_CONTROL_OPCODE
     control_init(&pkt);
 
-    // 2. Set header flags and sequence tracking
-    pkt.header.flags = 0x01; // RELIABLE
-    pkt.header.priority = 0x02; // URGENT
-    pkt.header.sequence_id = 101;
+    // Populate header fields
+    pkt.Header.Flags = 0x01;       // Reliable flag
+    pkt.Header.Priority = 0x02;    // QoS priority
+    pkt.Header.SequenceId = 1001;
 
-    // 3. Set payload fields
-    pkt.reason = 200; // OK
-    pkt.type = 1;     // PING
+    // Populate payload fields
+    pkt.Reason = 200;
+    pkt.Type = 1;
 
-    // 4. Allocate transmission buffer using compile-time FIXED_SIZE
+    // Buffer allocation using compile-time constant size
     uint8_t tx_buf[CONTROL_SIZE];
-    size_t written = control_serialize(&pkt, tx_buf, sizeof(tx_buf));
+    size_t bytes_written = control_serialize(&pkt, tx_buf, sizeof(tx_buf));
 
-    if (written > 0) {
-        // Send tx_buf over TCP/UDP/WebSocket socket
-        send(socket_fd, tx_buf, written, 0);
-        ESP_LOGI(TAG, "Sent Control packet (%d bytes)", (int)written);
+    if (bytes_written > 0) {
+        send(socket_fd, tx_buf, bytes_written, 0);
+        ESP_LOGI(TAG, "Transmitted Control packet (%d bytes)", (int)bytes_written);
     } else {
-        ESP_LOGE(TAG, "Failed to serialize Control packet");
+        ESP_LOGE(TAG, "Serialization failed: buffer too small");
     }
 }
 ```
 
 ---
 
-### C. Receiving and Dispatching Incoming Packets
+### 1.3 Packet Reception and Dispatching
 
-Read the first 6 bytes into `PacketHeader` to inspect the `OpCode`, then deserialize the specific packet payload:
+The standard dispatching pattern deserializes the 6-byte `PacketHeader` first, then routes the frame based on its 16-bit `OpCode`:
 
 ```c
 #include "packets.h"
 #include "esp_log.h"
 
-void handle_incoming_network_stream(const uint8_t *rx_buf, size_t rx_len)
+void process_incoming_frame(const uint8_t *rx_buf, size_t rx_len)
 {
-    // 1. Verify minimum frame length for the 6-byte header
     if (rx_len < PACKET_HEADER_SIZE) {
-        ESP_LOGW(TAG, "Incomplete packet header");
+        ESP_LOGW(TAG, "Frame truncated: smaller than header size (%d bytes)", PACKET_HEADER_SIZE);
         return;
     }
 
-    // 2. Read packet header to inspect the OpCode
     PacketHeader header;
     if (packet_header_deserialize(&header, rx_buf, rx_len) == 0) {
-        ESP_LOGE(TAG, "Malformed packet header");
+        ESP_LOGE(TAG, "Failed to parse packet header");
         return;
     }
 
-    // 3. Dispatch packet based on 16-bit OpCode
-    switch (header.op_code) {
+    switch (header.OpCode) {
         case PACKET_CONTROL_OPCODE: {
             Control pkt;
             if (control_deserialize(&pkt, rx_buf, rx_len) > 0) {
-                ESP_LOGI(TAG, "Received Control: reason=%u, type=%u", pkt.reason, pkt.type);
+                ESP_LOGI(TAG, "Received Control: reason=%u, type=%u", pkt.Reason, pkt.Type);
             }
             break;
         }
@@ -112,13 +104,13 @@ void handle_incoming_network_stream(const uint8_t *rx_buf, size_t rx_len)
         case PACKET_TIMESYNC_OPCODE: {
             TimeSync pkt;
             if (time_sync_deserialize(&pkt, rx_buf, rx_len) > 0) {
-                ESP_LOGI(TAG, "TimeSync client_ticks=%lld", (long long)pkt.client_send_ticks);
+                ESP_LOGI(TAG, "Received TimeSync: ticks=%lld", (long long)pkt.ClientSendTicks);
             }
             break;
         }
 
         default:
-            ESP_LOGW(TAG, "Unknown OpCode: 0x%04X", header.op_code);
+            ESP_LOGW(TAG, "Unhandled OpCode: 0x%04X", header.OpCode);
             break;
     }
 }
@@ -126,105 +118,99 @@ void handle_incoming_network_stream(const uint8_t *rx_buf, size_t rx_len)
 
 ---
 
-### D. Variable-Length Fields & Memory Management
+### 1.4 Dynamic Memory Management for Strings
 
-For packets containing variable-length `string` or `ReadOnlyMemory<byte>` fields:
-* Deserialization dynamically allocates memory with `malloc()` to store the payload bytes.
-* Always call `<packet>_free(&pkt)` when finished with the packet to prevent heap fragmentation or memory leaks on microcontrollers.
+For packets that contain variable-length string or binary data (`NalixString`), deserialization allocates heap memory via `malloc()`.
+
+To prevent memory leaks and heap fragmentation on microcontrollers, call `<packet>_free()` once processing is complete:
 
 ```c
-void process_variable_packet(const uint8_t *buf, size_t len)
+void process_telemetry_frame(const uint8_t *buf, size_t len)
 {
-    DynamicMessage pkt;
-    if (dynamic_message_deserialize(&pkt, buf, len) > 0) {
-        if (pkt.payload.data != NULL) {
-            ESP_LOGI(TAG, "Payload: %.*s", (int)pkt.payload.length, (char*)pkt.payload.data);
+    TelemetryMessage pkt;
+    if (telemetry_message_deserialize(&pkt, buf, len) > 0) {
+        if (pkt.Message.data != NULL && pkt.Message.length > 0) {
+            ESP_LOGI(TAG, "Telemetry: %.*s", (int)pkt.Message.length, (char*)pkt.Message.data);
         }
 
-        // CRITICAL: Free dynamically allocated payload memory
-        dynamic_message_free(&pkt);
+        // Deallocate heap-allocated string payload
+        telemetry_message_free(&pkt);
     }
 }
 ```
 
 ---
 
-### E. Microcontroller Alignment Safety
+### 1.5 Alignment Constraints on Embedded Architectures
 
-Microcontrollers with **Xtensa** (ESP32, ESP8266) or **ARM Cortex-M0/M3** cores trigger hardware exceptions when accessing multi-byte integers from unaligned memory addresses.
+Microcontrollers utilizing Xtensa (ESP32, ESP8266) or ARM Cortex-M0/M3 processors generate unaligned access hardware faults if multi-byte integers are dereferenced from odd memory addresses.
 
-Protogen's generated C serializer uses **sequential bitshift decoding**:
+Protogen serializers use sequential bitshift decoding:
 ```c
 uint16_t val = (uint16_t)(ptr[0] | ((uint16_t)ptr[1] << 8));
 ```
-This guarantees 100% alignment safety regardless of where `rx_buf` is placed in SRAM.
+This routine does not require memory alignment, allowing incoming frames to be parsed directly from raw network ring buffers or DMA memory regions.
 
 ---
 
-## 2. Cryptographic Handshake on Microcontrollers
+## 2. Embedded Cryptographic Handshake
 
-If your ESP32 client connects to a Nalix server requiring session establishment (Proof-of-Work, Diffie-Hellman Key Exchange, HMAC verification):
+When establishing authenticated sessions with a Nalix v14 server:
 
-* **Built-in `mbedtls` (ESP-IDF):** Use ESP-IDF's hardware-accelerated `mbedtls` for SHA-256 and AES-GCM.
-* **Monocypher:** For lightweight embedded devices, [Monocypher](https://monocypher.org/) offers a compact (~2KB ROM), zero-heap library implementing:
-  * Blake2b hashing (for Proof-of-Work verification).
-  * X25519 key exchange (for ECDH session keys).
-  * ChaCha20-Poly1305 (for AEAD encryption).
+- **Monocypher:** For resource-constrained devices (ESP8266, STM32, Cortex-M0), Monocypher provides Blake2b, ChaCha20-Poly1305, and X25519 key exchange in approximately 2 KB ROM with zero dynamic memory allocation.
+- **mbedTLS (ESP-IDF):** On ESP32, utilize the hardware-accelerated SHA-256 and AES-GCM engines exposed through ESP-IDF's native `mbedtls` component.
 
 ---
 
-## 3. Rust Integration Guide
+## 3. Rust Integration
 
-### A. Setup in `Cargo.toml`
+### 3.1 Cargo Configuration
 
-Add the generated module to your Rust project:
+Include the generated modules in your Rust library or binary:
 
 ```plaintext
-my_rust_service/
+rust_service/
 ├── Cargo.toml
 └── src/
-    ├── main.rs
-    ├── packets.rs         <-- Generated Rust module
-    └── packets_tests.rs   <-- Generated round-trip tests
+    ├── lib.rs
+    ├── packets.rs         # Generated Rust module
+    └── packets_tests.rs   # Generated round-trip tests
 ```
 
-In `src/main.rs` or `src/lib.rs`:
-
+#### `src/lib.rs`
 ```rust
 pub mod packets;
-use packets::{Control, PacketHeader};
 ```
 
 ---
 
-### B. Serialization & Deserialization
+### 3.2 Serialization & Deserialization
 
 ```rust
 use packets::{Control, PacketHeader};
 
-fn send_packet() -> Result<Vec<u8>, ()> {
+pub fn build_control_frame() -> Result<[u8; Control::FIXED_SIZE], ()> {
     let mut pkt = Control::default();
     pkt.header.op_code = Control::OPCODE;
     pkt.header.flags = 0x01;
     pkt.reason = 200;
     pkt.r#type = 1;
 
-    let mut buf = vec![0u8; Control::FIXED_SIZE];
-    pkt.serialize(&mut buf)?;
-
-    Ok(buf)
+    let mut buffer = [0u8; Control::FIXED_SIZE];
+    pkt.serialize(&mut buffer)?;
+    Ok(buffer)
 }
 
-fn handle_incoming(buf: &[u8]) -> Result<(), ()> {
-    let header = PacketHeader::deserialize(buf)?;
+pub fn handle_packet(bytes: &[u8]) -> Result<(), ()> {
+    let header = PacketHeader::deserialize(bytes)?;
 
     match header.op_code {
         Control::OPCODE => {
-            let pkt = Control::deserialize(buf)?;
-            println!("Received Control: reason={}, type={}", pkt.reason, pkt.r#type);
+            let pkt = Control::deserialize(bytes)?;
+            println!("Control packet received: reason={}", pkt.reason);
         }
         _ => {
-            println!("Unknown OpCode: {:#06X}", header.op_code);
+            println!("Unrecognized OpCode: {:#06X}", header.op_code);
         }
     }
 

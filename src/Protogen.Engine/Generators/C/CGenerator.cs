@@ -54,7 +54,6 @@ public sealed class CGenerator : ICodeGenerator
         _ = sb.AppendLine("// Length-prefixed UTF-8 string (matches Nalix codec wire format)");
         _ = sb.AppendLine("// null = length -1, empty = length 0, otherwise [int32_t length][utf8 bytes]");
         _ = sb.AppendLine("typedef struct { int32_t length; uint8_t* data; } NalixString;");
-        _ = sb.AppendLine("void nalix_string_free(NalixString* s);");
         _ = sb.AppendLine();
         AppendInvariant(sb, $"// Nalix v14 standard {ProtocolConstants.PacketHeaderSize}-byte packet header");
         AppendInvariant(sb, $"#define PACKET_HEADER_SIZE {ProtocolConstants.PacketHeaderSize}");
@@ -78,6 +77,15 @@ public sealed class CGenerator : ICodeGenerator
             _ = sb.AppendLine("#endif");
             _ = sb.AppendLine();
         }
+
+        _ = sb.AppendLine("#ifdef __cplusplus");
+        _ = sb.AppendLine("extern \"C\" {");
+        _ = sb.AppendLine("#endif");
+        _ = sb.AppendLine();
+        _ = sb.AppendLine("void nalix_string_free(NalixString* s);");
+        _ = sb.AppendLine("size_t packet_header_serialize(const PacketHeader* header, uint8_t* buf, size_t buf_size);");
+        _ = sb.AppendLine("size_t packet_header_deserialize(PacketHeader* header, const uint8_t* buf, size_t buf_size);");
+        _ = sb.AppendLine();
 
         foreach (PacketSchema p in nonHeaderPackets)
         {
@@ -120,6 +128,10 @@ public sealed class CGenerator : ICodeGenerator
             _ = sb.AppendLine();
         }
 
+        _ = sb.AppendLine("#ifdef __cplusplus");
+        _ = sb.AppendLine("}");
+        _ = sb.AppendLine("#endif");
+
         return sb.ToString();
     }
 
@@ -137,18 +149,45 @@ public sealed class CGenerator : ICodeGenerator
         _ = sb.AppendLine("}");
         _ = sb.AppendLine();
 
+        _ = sb.AppendLine("size_t packet_header_serialize(const PacketHeader* header, uint8_t* buf, size_t buf_size)");
+        _ = sb.AppendLine("{");
+        _ = sb.AppendLine("    if (!header || !buf || buf_size < PACKET_HEADER_SIZE) return 0;");
+        _ = sb.AppendLine("    buf[0] = (uint8_t)(header->OpCode & 0xFF);");
+        _ = sb.AppendLine("    buf[1] = (uint8_t)((header->OpCode >> 8) & 0xFF);");
+        _ = sb.AppendLine("    buf[2] = header->Flags;");
+        _ = sb.AppendLine("    buf[3] = header->Priority;");
+        _ = sb.AppendLine("    buf[4] = (uint8_t)(header->SequenceId & 0xFF);");
+        _ = sb.AppendLine("    buf[5] = (uint8_t)((header->SequenceId >> 8) & 0xFF);");
+        _ = sb.AppendLine("    return PACKET_HEADER_SIZE;");
+        _ = sb.AppendLine("}");
+        _ = sb.AppendLine();
+
+        _ = sb.AppendLine("size_t packet_header_deserialize(PacketHeader* header, const uint8_t* buf, size_t buf_size)");
+        _ = sb.AppendLine("{");
+        _ = sb.AppendLine("    if (!header || !buf || buf_size < PACKET_HEADER_SIZE) return 0;");
+        _ = sb.AppendLine("    header->OpCode = (uint16_t)(buf[0] | ((uint16_t)buf[1] << 8));");
+        _ = sb.AppendLine("    header->Flags = buf[2];");
+        _ = sb.AppendLine("    header->Priority = buf[3];");
+        _ = sb.AppendLine("    header->SequenceId = (uint16_t)(buf[4] | ((uint16_t)buf[5] << 8));");
+        _ = sb.AppendLine("    return PACKET_HEADER_SIZE;");
+        _ = sb.AppendLine("}");
+        _ = sb.AppendLine();
+
         foreach (PacketSchema p in nonHeaderPackets)
         {
             string name = p.Name;
             string lower = name.ToLowerInvariant();
             int fixedSize = CalculateFixedSize(p);
 
+            FieldSchema? headerField = p.Fields.FirstOrDefault(f => f.IsHeader || f.CType == ProtocolConstants.PacketHeaderName);
+            string headerName = headerField?.Name ?? "Header";
+
             // Init helper
             AppendInvariant(sb, $"void {lower}_init({name}* pkt)");
             _ = sb.AppendLine("{");
             _ = sb.AppendLine("    if (!pkt) return;");
             AppendInvariant(sb, $"    memset(pkt, 0, sizeof({name}));");
-            AppendInvariant(sb, $"    pkt->Header.OpCode = PACKET_{p.Name.ToUpperInvariant()}_OPCODE;");
+            AppendInvariant(sb, $"    pkt->{headerName}.OpCode = PACKET_{p.Name.ToUpperInvariant()}_OPCODE;");
             _ = sb.AppendLine("}");
             _ = sb.AppendLine();
 

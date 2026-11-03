@@ -3,26 +3,33 @@
 
 using Protogen.Core.Contracts;
 using Protogen.Core.Models;
+using Protogen.Core.Validation;
 using Protogen.Engine.Analysis;
 using Protogen.Engine.Generators.C;
 using Protogen.Engine.Generators.Rust;
 
 #pragma warning disable CA1303 // Do not pass literals as localized parameters
 #pragma warning disable CA1848 // Use the LoggerMessage delegates
+#pragma warning disable CA1849 // Call async methods when in an async method
 
 namespace Protogen.Cli;
 
 internal static class Program
 {
+    private const int ExitSuccess = 0;
+    private const int ExitGeneralError = 1;
+    private const int ExitValidationError = 2;
+    private const int ExitUsageError = 64;
+
     private static async Task<int> Main(string[] args)
     {
-        Console.WriteLine("Protogen — Cross-Platform Binary Packet Code Generator");
-        Console.WriteLine("========================================================\n");
+        Console.WriteLine("Protogen Code Generator");
+        Console.WriteLine("=======================\n");
 
         if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
         {
             ShowHelp();
-            return 0;
+            return ExitSuccess;
         }
 
         string? projectPath = null;
@@ -30,6 +37,7 @@ internal static class Program
         string? cOut = null;
         string? rustOut = null;
         bool verbose = false;
+        bool strict = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -53,23 +61,28 @@ internal static class Program
                 case "-v":
                     verbose = true;
                     break;
-                default:
+                case "--strict":
+                    strict = true;
                     break;
+                default:
+                    Console.Error.WriteLine($"Error: Unrecognized option '{args[i]}'.\n");
+                    ShowHelp();
+                    return ExitUsageError;
             }
         }
 
         if (string.IsNullOrEmpty(projectPath) && string.IsNullOrEmpty(assemblyPath))
         {
-            Console.WriteLine("Error: Missing required --project (-p) or --assembly (-a) argument.\n");
+            Console.Error.WriteLine("Error: Missing required --project (-p) or --assembly (-a) argument.\n");
             ShowHelp();
-            return 1;
+            return ExitUsageError;
         }
 
         if (string.IsNullOrEmpty(cOut) && string.IsNullOrEmpty(rustOut))
         {
-            Console.WriteLine("Error: At least one of --c-out or --rust-out must be specified.\n");
+            Console.Error.WriteLine("Error: At least one target output directory (--c-out or --rust-out) must be specified.\n");
             ShowHelp();
-            return 1;
+            return ExitUsageError;
         }
 
         try
@@ -82,7 +95,7 @@ internal static class Program
             {
                 analyzer = new RoslynProjectAnalyzer();
                 targetPath = projectPath;
-                Console.WriteLine($"Analyzing C# project: {targetPath}");
+                Console.WriteLine($"Analyzing C# source project: {targetPath}");
             }
             else
             {
@@ -94,7 +107,39 @@ internal static class Program
             IReadOnlyList<PacketSchema> packets = await analyzer.AnalyzeAsync(targetPath).ConfigureAwait(false);
             Console.WriteLine($"Discovered {packets.Count} packet definition(s).\n");
 
-            // 2. Execute Code Generation per target language
+            // 2. Validate schemas against protocol invariants
+            SchemaValidator validator = new();
+            ValidationResult validationResult = validator.Validate(packets);
+
+            if (validationResult.Diagnostics.Count > 0)
+            {
+                Console.WriteLine("Schema Validation Diagnostics:");
+                foreach (SchemaDiagnostic diagnostic in validationResult.Diagnostics)
+                {
+                    string prefix = diagnostic.Severity switch
+                    {
+                        DiagnosticSeverity.Error => "  [ERROR]",
+                        DiagnosticSeverity.Warning => "  [WARN] ",
+                        _ => "  [INFO] "
+                    };
+                    Console.WriteLine($"{prefix} {diagnostic.Code}: {diagnostic.Message}");
+                }
+                Console.WriteLine();
+            }
+
+            if (!validationResult.IsValid)
+            {
+                Console.Error.WriteLine($"Validation failed with {validationResult.Errors.Count()} critical error(s). Generation aborted.");
+                return ExitValidationError;
+            }
+
+            if (strict && validationResult.Warnings.Any())
+            {
+                Console.Error.WriteLine($"Validation failed due to --strict flag with {validationResult.Warnings.Count()} warning(s). Generation aborted.");
+                return ExitValidationError;
+            }
+
+            // 3. Execute Code Generation per target language
             if (!string.IsNullOrEmpty(cOut))
             {
                 await RunGeneratorAsync(new CGenerator(), packets, cOut).ConfigureAwait(false);
@@ -105,17 +150,17 @@ internal static class Program
                 await RunGeneratorAsync(new RustGenerator(), packets, rustOut).ConfigureAwait(false);
             }
 
-            Console.WriteLine("All generators finished successfully.");
-            return 0;
+            Console.WriteLine("Code generation completed successfully.");
+            return ExitSuccess;
         }
         catch (Exception ex) when (IsNonFatal(ex))
         {
-            Console.WriteLine($"\nERROR: {ex.Message}");
+            Console.Error.WriteLine($"\nExecution failed: {ex.Message}");
             if (verbose)
             {
-                Console.WriteLine(ex);
+                Console.Error.WriteLine(ex);
             }
-            return 1;
+            return ExitGeneralError;
         }
     }
 
@@ -144,7 +189,7 @@ internal static class Program
             count++;
         }
 
-        Console.WriteLine($"  Summary: Generated {count} file(s) for {generator.LanguageName}.\n");
+        Console.WriteLine($"  Summary: Emitted {count} file(s) for {generator.LanguageName}.\n");
     }
 
     private static bool IsNonFatal(Exception ex) =>
@@ -153,7 +198,7 @@ internal static class Program
     private static void ShowHelp()
     {
         Console.WriteLine("Description:");
-        Console.WriteLine("  High-performance code generator transforming C# packet schemas into unmanaged C (C99/ESP-IDF)");
+        Console.WriteLine("  Code generator transforming C# packet schemas into unmanaged C (C99/ESP-IDF)");
         Console.WriteLine("  and Rust models with zero external dependencies.");
         Console.WriteLine();
         Console.WriteLine("Usage:");
@@ -164,8 +209,9 @@ internal static class Program
         Console.WriteLine("  -a, --assembly <path>    Path to the compiled C# assembly (.dll) containing packet contracts");
         Console.WriteLine("  --c-out <dir>            Output directory for generated C headers and source");
         Console.WriteLine("  --rust-out <dir>         Output directory for generated Rust modules");
-        Console.WriteLine("  -v, --verbose            Enable verbose output");
-        Console.WriteLine("  -h, --help               Display help documentation");
+        Console.WriteLine("  --strict                 Treat validation warnings as errors and abort generation");
+        Console.WriteLine("  -v, --verbose            Enable verbose diagnostic output and stack traces");
+        Console.WriteLine("  -h, --help               Display command-line help documentation");
         Console.WriteLine();
     }
 }

@@ -1,12 +1,10 @@
 # Protogen Architecture Specification
 
-This document details the internal architecture, design principles, compilation pipeline, and core engineering decisions behind **Protogen**.
+## 1. System Overview
 
----
+Protogen is a domain-driven code generation utility designed to convert C# packet contract declarations into unmanaged, byte-for-byte wire-compatible C and Rust data models.
 
-## 1. Architectural Principles
-
-Protogen is designed around **Domain-Driven Design (DDD)** and **SOLID** object-oriented principles:
+The system is partitioned into three decoupled assemblies adhering to Domain-Driven Design (DDD) layer boundaries and SOLID principles:
 
 ```mermaid
 graph TD
@@ -17,14 +15,15 @@ graph TD
     subgraph Core ["Domain Core (Protogen.Core)"]
         Contracts["Contracts: IContractAnalyzer, ICodeGenerator"]
         DomainModels["Models: PacketSchema, FieldSchema, GeneratedFile"]
+        Validation["Validation: ISchemaValidator, SchemaValidator, SchemaDiagnostic"]
         Constants["Constants: ProtocolConstants, ContractMetadata"]
     end
 
     subgraph Engine ["Infrastructure & Engine (Protogen.Engine)"]
-        RoslynAnalyzer["RoslynProjectAnalyzer"]
-        ReflectionAnalyzer["ReflectionAssemblyAnalyzer"]
+        RoslynAnalyzer["RoslynProjectAnalyzer (MSBuild / Roslyn AST)"]
+        ReflectionAnalyzer["ReflectionAssemblyAnalyzer (.NET Metadata)"]
         CGen["CGenerator (C99 / ESP-IDF)"]
-        RustGen["RustGenerator"]
+        RustGen["RustGenerator (Rust 2021)"]
     end
 
     CLI --> Core
@@ -32,114 +31,171 @@ graph TD
     Engine --> Core
 ```
 
-### Clean Architecture Boundaries
+---
 
-1. **`Protogen.Core` (Domain Layer):**
-   * Contains immutable domain entities and value objects: `PacketSchema`, `FieldSchema`, `GeneratedFile`.
-   * Defines domain contracts: `IContractAnalyzer`, `ICodeGenerator`, `GenerationContext`.
-   * Defines protocol invariants: `ProtocolConstants` (6-byte header size, opcode extraction rules) and `ContractMetadata`.
-   * **Zero external dependencies**: Depends solely on standard .NET runtime abstractions.
+## 2. Layer Responsibilities
 
-2. **`Protogen.Engine` (Analysis & Generation Layer):**
-   * Implements `IContractAnalyzer` using two distinct strategies:
-     * `RoslynProjectAnalyzer`: Uses Microsoft Roslyn workspace compilation to inspect C# source code (`.csproj`) without executing target binaries.
-     * `ReflectionAssemblyAnalyzer`: Uses reflection to load and inspect compiled assemblies (`.dll`).
-   * Implements `ICodeGenerator` for target languages:
-     * `CGenerator`: Produces C99 headers (`packets.h`), implementations (`packets.c`), and unit test runners (`packet_test.c`).
-     * `RustGenerator`: Produces safe Rust modules (`packets.rs`) and test suites (`packets_tests.rs`).
+### 2.1 Domain Layer (`Protogen.Core`)
 
-3. **`Protogen.Cli` (Application & Presentation Layer):**
-   * Single responsibility: parses command-line arguments, selects the appropriate analyzer strategy, passes domain schemas to active generators, and writes generated files to disk.
+The domain layer encapsulates all business logic, invariant verification, and data models of the protocol representation. It has zero dependencies on external NuGet packages or Roslyn compiler libraries.
+
+- **Models:**
+  - `PacketSchema`: Immutable representation of a packet definition, including its 16-bit OpCode, field definitions, and wire size calculations.
+  - `FieldSchema`: Value object defining individual packet field properties (data types, serialization order, size in bytes, nullability).
+  - `GeneratedFile`: Encapsulates an emitted source file, relative destination path, and file contents.
+- **Contracts:**
+  - `IContractAnalyzer`: Abstraction for parsing packet contracts from source trees or binaries.
+  - `ICodeGenerator`: Abstraction for rendering target language source code from an immutable list of `PacketSchema`.
+- **Validation:**
+  - `ISchemaValidator` / `SchemaValidator`: Enforces protocol invariants and language-specific constraints prior to code generation.
+  - `SchemaDiagnostic`: Encapsulates structured diagnostic messages with severity levels (`Information`, `Warning`, `Error`) and rule identifiers.
+- **Constants:**
+  - `ProtocolConstants`: Defines fundamental wire protocol characteristics, such as the 6-byte header size and primitive type byte counts.
+  - `ContractMetadata`: String identifiers for contract attributes (`[NalixPacket]`, `[Packet]`, `[SerializeOrder]`, `[SerializeHeader]`).
+
+### 2.2 Infrastructure & Engine Layer (`Protogen.Engine`)
+
+The engine layer implements domain contracts for analysis and code generation.
+
+- **Analysis Implementations:**
+  - `RoslynProjectAnalyzer`: Loads `.csproj` projects via MSBuild workspaces, compiles syntax trees, queries semantic models, and extracts field metadata without executing target code.
+  - `ReflectionAssemblyAnalyzer`: Inspects compiled `.dll` assemblies via reflection, querying custom attribute providers and field offsets.
+  - `TypeResolver`: Maps C# types (primitives, enums, byte buffers, strings) to unmanaged C types and Rust types.
+  - `OpCodeEvaluator`: Evaluates compile-time constant expressions for `StaticOpCode`.
+- **Generation Implementations:**
+  - `CGenerator`: Emits C99 headers (`packets.h`), implementations (`packets.c`), and unit test runners (`packet_test.c`).
+  - `RustGenerator`: Emits safe Rust modules (`packets.rs`) and round-trip unit test modules (`packets_tests.rs`).
+
+### 2.3 Presentation Layer (`Protogen.Cli`)
+
+The CLI layer is responsible for input validation, execution orchestration, diagnostic reporting, and process exit codes:
+- Parses command-line arguments.
+- Instantiates the chosen `IContractAnalyzer`.
+- Executes `SchemaValidator` and outputs structured diagnostics.
+- Coordinates target `ICodeGenerator` instances and writes generated files to disk.
 
 ---
 
-## 2. SOLID Adherence
+## 3. SOLID Design Adherence
 
-| Principle | Implementation in Protogen |
-| :--- | :--- |
-| **Single Responsibility (SRP)** | Each analyzer only extracts metadata into `PacketSchema`. Each generator only transforms `PacketSchema` into source code strings. The CLI only coordinates I/O. |
-| **Open/Closed (OCP)** | Adding a new target language (e.g. Go, Python, Swift, TypeScript) requires implementing `ICodeGenerator` without modifying existing analyzers or CLI code. |
-| **Liskov Substitution (LSP)** | `RoslynProjectAnalyzer` and `ReflectionAssemblyAnalyzer` can be used interchangeably via `IContractAnalyzer` with identical output schema semantics. |
-| **Interface Segregation (ISP)** | `IContractAnalyzer` and `ICodeGenerator` have narrow, focused contracts without unnecessary methods. |
-| **Dependency Inversion (DIP)** | The CLI and Generators depend on domain abstractions (`IContractAnalyzer`, `ICodeGenerator`, `PacketSchema`) defined in `Protogen.Core`, never on concrete implementations. |
+### 3.1 Single Responsibility Principle (SRP)
+- `IContractAnalyzer` implementations only extract metadata into domain models.
+- `ISchemaValidator` only inspects domain models for protocol rule violations.
+- `ICodeGenerator` implementations only transform domain models into target language source strings.
+- `Protogen.Cli` only manages process input, output, and process return codes.
+
+### 3.2 Open/Closed Principle (OCP)
+The code generation pipeline is open for extension but closed for modification. Adding a new target language (e.g., Go, Python, Swift) requires implementing `ICodeGenerator` without modifying existing analyzers, validators, or CLI execution flow.
+
+### 3.3 Liskov Substitution Principle (LSP)
+Both `RoslynProjectAnalyzer` and `ReflectionAssemblyAnalyzer` implement `IContractAnalyzer`. They are fully interchangeable and yield identical `PacketSchema` representations from identical contract definitions.
+
+### 3.4 Interface Segregation Principle (ISP)
+Interfaces are narrowly defined:
+- `IContractAnalyzer`: Single asynchronous method `AnalyzeAsync(string targetPath, CancellationToken ct)`.
+- `ICodeGenerator`: Single method `Generate(IReadOnlyList<PacketSchema> packets)`.
+- `ISchemaValidator`: Single method `Validate(IReadOnlyList<PacketSchema> packets)`.
+
+### 3.5 Dependency Inversion Principle (DIP)
+High-level modules (the CLI runner) and low-level modules (the generators and analyzers) depend entirely on abstractions defined in `Protogen.Core`, ensuring zero cyclic dependencies and clean testability.
 
 ---
 
-## 3. Compiler Pipeline
+## 4. Pipeline Execution Lifecycle
 
 ```mermaid
 sequenceDiagram
-    participant User as CLI User
     participant CLI as Protogen.Cli
     participant Analyzer as IContractAnalyzer
-    participant Schema as PacketSchema (Domain)
+    participant Validator as ISchemaValidator
     participant Generator as ICodeGenerator
     participant Disk as File System
 
-    User->>CLI: protogen -a Nalix.Codec.dll --c-out ./c --rust-out ./rust
-    CLI->>Analyzer: AnalyzeAsync("Nalix.Codec.dll")
-    Analyzer->>Analyzer: Discover types with [NalixPacket] or [Packet]
+    CLI->>Analyzer: AnalyzeAsync(targetPath)
+    Analyzer->>Analyzer: Discover packet types via attributes
     Analyzer->>Analyzer: Extract StaticOpCode & [SerializeOrder] fields
     Analyzer-->>CLI: IReadOnlyList<PacketSchema>
     
-    CLI->>Generator: CGenerator.Generate(schemas)
-    Generator-->>CLI: List<GeneratedFile> (packets.h, packets.c, packet_test.c)
-    CLI->>Disk: Write files to ./c/
-
-    CLI->>Generator: RustGenerator.Generate(schemas)
-    Generator-->>CLI: List<GeneratedFile> (packets.rs, packets_tests.rs)
-    CLI->>Disk: Write files to ./rust/
+    CLI->>Validator: Validate(packets)
+    Validator-->>CLI: ValidationResult (Diagnostics, IsValid)
+    
+    alt Validation Failed (Errors detected or --strict enabled)
+        CLI-->>Disk: Abort execution (Exit Code 2)
+    else Validation Succeeded
+        CLI->>Generator: Generate(packets)
+        Generator-->>CLI: IReadOnlyList<GeneratedFile>
+        CLI->>Disk: Write files to output directories
+    end
 ```
-
-### Pipeline Execution Stages:
-1. **Target Selection:** CLI validates CLI arguments and selects `RoslynProjectAnalyzer` (for `.csproj`) or `ReflectionAssemblyAnalyzer` (for `.dll`).
-2. **Semantic Discovery:** The analyzer scans types decorated with `[NalixPacket]` or `[Packet]`, evaluates `StaticOpCode`, filters ignored properties (`[SerializeIgnore]`), and sorts fields according to `[SerializeHeader(n)]` and `[SerializeOrder(n)]`.
-3. **Domain Normalization:** Injects the Nalix v14 6-byte `PacketHeader` at index `0` if the packet inherits `PacketBase<TSelf>`, calculates fixed wire sizes, and records variable-length traits.
-4. **Code Generation:** Selected generators iterate through domain schemas and output idiomatic target source files.
 
 ---
 
-## 4. Key Design Decisions
+## 5. Schema Validation Engine
 
-### A. Total Decoupling from Nalix Assemblies
-Earlier prototypes referenced Nalix NuGet packages (`Nalix.Codec`, `Nalix.Abstractions`). This created brittle dependencies when Nalix versioned up.
+The `SchemaValidator` enforces the following rules prior to code emission:
 
-**Protogen** operates completely standalone:
-* Analyzers query attribute names via string metadata (`ContractMetadata.PacketAttributeNames`, `ContractMetadata.SerializeOrderNames`).
-* OpCodes are discovered by evaluating the compile-time constant `StaticOpCode` or looking for interface `IPacketStaticOpcode`.
-* Protogen contains **zero** `<ProjectReference>` or NuGet package dependencies to Nalix.
+| Rule Code | Severity | Description | Action |
+| :--- | :--- | :--- | :--- |
+| `PG001` | Error | Duplicate OpCode detected across distinct packet types. | Aborts generation. |
+| `PG002` | Warning | Packet OpCode is `0x0000` (reserved or uninitialized). | Logs warning. |
+| `PG003` | Error | Duplicate `[SerializeOrder]` index within the same packet. | Aborts generation. |
+| `PG004` | Information | Packet defines no payload fields. | Logs informational notice. |
+| `PG005` | Error | Case-insensitive packet name collision (clashes in C). | Aborts generation. |
+| `PG006` | Warning | Field name matches an ANSI C reserved keyword. | Logs warning. |
+| `PG007` | Warning | Packet wire size exceeds 65535 bytes (MTU threshold). | Logs warning. |
 
-### B. Microcontroller-Safe Sequential Shift Decoding
-Many embedded processors (such as ESP32 Xtensa cores, ESP32-C3 RISC-V, and ARM Cortex-M0/M3) panic or trigger hardware exceptions when performing unaligned 16-bit, 32-bit, or 64-bit memory accesses via pointer casting (`*((uint32_t*)ptr)`).
+---
 
-To guarantee 100% crash safety on embedded hardware:
-* Serialization uses `memcpy` and explicit byte-order shifts.
-* Deserialization reads bytes sequentially using bit shifts:
+## 6. Architecture & Implementation Decisions
+
+### 6.1 Decoupling from Nalix Packages
+Protogen does not reference `Nalix.Codec` or `Nalix.Abstractions` directly. Contract analysis relies on string metadata matching defined in `ContractMetadata`. This ensures the code generator remains functional across Nalix major versions without assembly binding redirects or package lock conflicts.
+
+### 6.2 Microcontroller-Safe Sequential Shift Decoding
+Many embedded processors (including Xtensa cores on ESP32, RISC-V cores on ESP32-C3, and ARM Cortex-M0) trigger hardware exceptions on unaligned multi-byte memory access (e.g., `*(uint16_t*)ptr`).
+
+To prevent memory alignment faults:
+- Serialization uses `memcpy` and explicit byte-order shifts.
+- Deserialization reads bytes sequentially via bitwise shifts:
   ```c
   uint16_t val = (uint16_t)(ptr[0] | ((uint16_t)ptr[1] << 8));
   ```
-* This pattern is guaranteed by the C standard to work on all CPU architectures, regardless of hardware alignment constraints.
+This pattern is architecture-agnostic and guarantees determinism across all unaligned memory configurations.
 
-### C. Multi-Compiler Memory Packing
-Different C compilers use different directives for structure alignment packing:
-* MSVC uses `#pragma pack(push, 1) ... #pragma pack(pop)`
-* GCC and Clang use `__attribute__((packed))` or `#pragma pack(push, 1)`
+### 6.3 Multi-Compiler Structure Packing
+Different compiler toolchains employ distinct mechanisms to eliminate structure padding:
+- GCC and Clang support `__attribute__((packed))` and `#pragma pack(push, 1)`.
+- MSVC supports `#pragma pack(push, 1)`.
 
-Protogen emits cross-compiler preprocessor guards to ensure structures are tightly packed without padding bytes on all toolchains:
+Protogen generates cross-compiler preprocessor directives:
 ```c
-#if defined(_MSC_VER)
-    #pragma pack(push, 1)
-#elif defined(__GNUC__) || defined(__clang__)
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
     #pragma pack(push, 1)
 #endif
 
 typedef struct {
-    PacketHeader header;
-    uint16_t reason;
-    uint8_t type;
+    PacketHeader Header;
+    uint16_t Reason;
+    uint8_t Type;
 } Control;
 
 #if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
     #pragma pack(pop)
+#endif
+```
+
+### 6.4 C++ Linkage Compatibility
+To support compilation under C++ toolchains (such as Arduino IDE, ESP-IDF C++ components, or native C++ backends), the generated C header encloses all function declarations in an `extern "C"` linkage guard:
+```c
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void control_init(Control* pkt);
+size_t control_serialize(const Control* pkt, uint8_t* buf, size_t buf_size);
+size_t control_deserialize(Control* pkt, const uint8_t* buf, size_t buf_size);
+
+#ifdef __cplusplus
+}
 #endif
 ```
