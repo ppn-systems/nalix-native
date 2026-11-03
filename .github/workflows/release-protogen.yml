@@ -1,9 +1,11 @@
-name: CD Release
+name: CD Release Protogen Tool
 
 on:
   push:
     tags:
       - 'v*'
+      - 'protogen-v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
