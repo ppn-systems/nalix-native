@@ -5,14 +5,15 @@
 Nalix Native is a unified cross-platform native SDK and tooling repository designed for the Nalix binary messaging protocol.
 
 The repository is partitioned into two primary functional components:
-1. **Client SDKs (`clients/`):** Canonical, zero-dependency C99 and Rust client runtime architectures adhering to clean enterprise transport patterns (Status codes, Wire framing, Channel connectivity states, Client lifecycle).
+1. **Client SDKs (`clients/`):** Canonical, zero-dependency C99, Rust, and TypeScript/Web client runtime architectures adhering to clean enterprise transport patterns (Status codes, Wire framing, Channel connectivity states, Client lifecycle).
 2. **Protocol Generator (`tools/protogen/`):** A Domain-Driven Design (DDD) utility partitioned into decoupled assemblies adhering to SOLID principles for analyzing C# contracts and generating wire-compatible C and Rust data models.
 
 ```mermaid
 graph TD
-    subgraph Clients ["Native Client SDKs"]
+    subgraph Clients ["Client SDKs"]
         ClientC["C Client SDK (C99 / ESP-IDF / FreeRTOS / POSIX)"]
         ClientRust["Rust Client SDK (nalix-client)"]
+        ClientTS["TypeScript / Web Client SDK (@ppn/nalix-client)"]
     end
 
     subgraph Tooling ["Protocol Code Generator (tools/protogen)"]
@@ -37,7 +38,7 @@ graph TD
 
 ## 2. Client SDK Architecture
 
-The client runtime libraries (`clients/c/` and `clients/rust/`) adopt canonical network client patterns tailored for high-throughput, low-overhead binary messaging:
+The client runtime libraries (`clients/c/`, `clients/rust/`, and `clients/ts/`) adopt canonical network client patterns tailored for high-throughput, low-overhead binary messaging:
 
 ### 2.1 Canonical Status Codes
 Error handling strictly maps to 17 standard status codes:
@@ -73,6 +74,12 @@ Channels transition through deterministic states matching the client connection 
 - `READY`: Connection established and available for packet exchange.
 - `TRANSIENT_FAILURE`: Connection lost or failed handshake, attempting backoff reconnect.
 - `SHUTDOWN`: Channel has been explicitly closed and destroyed.
+
+### 2.4 Browser and Web Support (TypeScript SDK)
+The TypeScript client runs directly within web browser runtimes without external polyfills or Node.js shims:
+- Operates on native `window.WebSocket` and `ArrayBuffer` / `DataView`.
+- Zero third-party dependencies at runtime.
+- Emits ES modules (ESM) compatible with Next.js, Vite, Webpack, Node.js, Deno, and Bun.
 
 ---
 

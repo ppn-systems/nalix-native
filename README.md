@@ -4,7 +4,7 @@
 [![Target Runtime](https://img.shields.io/badge/.NET-10.0-blue)](https://dotnet.microsoft.com)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](LICENSE)
 
-Nalix Native is the official cross-platform native SDK and tooling repository for the Nalix binary messaging protocol. It provides native high-performance client SDKs (C99, Rust) and an unmanaged code generator (`protogen`) for native systems and embedded runtimes (ESP-IDF, FreeRTOS, STM32, Linux, Windows).
+Nalix Native is the official cross-platform native SDK and tooling repository for the Nalix binary messaging protocol. It provides native high-performance client SDKs (C99, Rust, TypeScript / Web) and an unmanaged code generator (`protogen`) for native systems, web applications, and embedded runtimes (Web Browsers, Node.js, ESP-IDF, FreeRTOS, STM32, Linux, Windows).
 
 ---
 
@@ -12,7 +12,7 @@ Nalix Native is the official cross-platform native SDK and tooling repository fo
 
 - [Architecture Specification](docs/ARCHITECTURE.md): Domain-Driven Design (DDD), SOLID principles, native client contracts, and Roslyn/Reflection analysis pipelines.
 - [Wire Protocol & Type Specification](docs/SPECIFICATION.md): Nalix v14 6-byte header, opcode discovery, primitive and complex type mappings.
-- [Integration Guide](docs/INTEGRATION.md): Integration patterns for ESP-IDF, FreeRTOS, Linux/POSIX, and Rust services.
+- [Integration Guide](docs/INTEGRATION.md): Integration patterns for Web Browsers, Node.js, ESP-IDF, FreeRTOS, Linux/POSIX, and Rust services.
 
 ---
 
@@ -28,9 +28,13 @@ nalix-native/
 │   │   ├── src/                  # Client implementation
 │   │   ├── tests/                # Verification test suite
 │   │   └── CMakeLists.txt        # CMake build configuration
-│   └── rust/                     # Rust client SDK (nalix-client crate)
+│   ├── rust/                     # Rust client SDK (nalix-client crate)
+│   │   ├── src/                  # Client implementation (status, packet, channel, client)
+│   │   └── Cargo.toml            # Crate manifest
+│   └── ts/                       # TypeScript / Web client SDK (@ppn/nalix-client)
 │       ├── src/                  # Client implementation (status, packet, channel, client)
-│       └── Cargo.toml            # Crate manifest
+│       ├── tests/                # Verification test suite
+│       └── package.json          # Package manifest
 │
 ├── tools/                        # Tooling and generators
 │   └── protogen/                 # Binary contract code generator
@@ -61,6 +65,7 @@ The client libraries provide clean, modular, and decoupled abstractions tailored
 2. **Wire Framing:** Nalix v14 6-byte header (`OpCode`, `Flags`, `Priority`, `SequenceId`) with Little-Endian byte order.
 3. **Channel State Machine:** Deterministic connection lifecycle (`IDLE`, `CONNECTING`, `READY`, `TRANSIENT_FAILURE`, `SHUTDOWN`).
 4. **Transport Decoupling:** Core packet framing and channel management are decoupled from underlying physical transports (TCP, UDP, KCP, WebSocket, or serial/UART).
+5. **Direct Web Browser Support:** TypeScript client runs natively in all browsers via `WebSocket`, `ArrayBuffer`, and `DataView` with zero runtime dependencies.
 
 ---
 
@@ -127,6 +132,13 @@ cargo test --manifest-path clients/rust/Cargo.toml
 
 # Test Generated Rust Codecs
 cargo test --manifest-path examples/rust/Cargo.toml
+```
+
+### 4. TypeScript / Web Client Test Suite
+
+```bash
+# Test TypeScript Client SDK
+cd clients/ts && npm test
 ```
 
 ---
