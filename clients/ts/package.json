@@ -1,6 +1,6 @@
 {
   "name": "@ppnsys/nalix-sdk",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Nalix Native TypeScript / JavaScript Client SDK for Web Browsers and Node.js runtimes",
   "type": "module",
   "main": "./dist/src/index.js",

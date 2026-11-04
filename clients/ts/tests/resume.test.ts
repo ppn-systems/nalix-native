@@ -5,6 +5,8 @@ import {
   ChannelConfig,
   Packet,
   PacketHeader,
+  PacketFlags,
+  FramePipeline,
   ProtocolOpCode,
   ProtocolReason,
   SessionResumeStage,
@@ -264,6 +266,9 @@ test('Extensions: rekey rotates session secret with HKDF ratcheting', async () =
   // Rekey request was sent
   assert.equal(session.outboundFrames.length, 1);
   const outbound = session.outboundFrames[0];
+  // Post-handshake control frames are encrypted; decrypt with the current secret to check the body.
+  assert.notEqual(outbound.header.flags & PacketFlags.ENCRYPTED, 0, 'REKEY must be encrypted');
+  FramePipeline.processInbound(outbound, session.sessionState);
   assert.equal(outbound.header.opcode, ProtocolOpCode.SYSTEM_CONTROL);
   assert.equal(outbound.payload[2], ControlType.SESSION_REKEY);
 
@@ -288,6 +293,8 @@ test('Extensions: disconnectGracefully sends DISCONNECT control frame and closes
 
   assert.equal(session.outboundFrames.length, 1);
   const outbound = session.outboundFrames[0];
+  assert.notEqual(outbound.header.flags & PacketFlags.ENCRYPTED, 0, 'DISCONNECT must be encrypted');
+  FramePipeline.processInbound(outbound, session.sessionState);
   assert.equal(outbound.header.opcode, ProtocolOpCode.SYSTEM_CONTROL);
   assert.equal(outbound.payload[2], ControlType.DISCONNECT);
 
