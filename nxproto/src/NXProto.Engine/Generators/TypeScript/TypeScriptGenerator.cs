@@ -10,7 +10,7 @@ namespace NXProto.Engine.Generators.TypeScript;
 
 /// <summary>
 /// Code generator for TypeScript packet classes with binary Little-Endian DataView serialization/deserialization.
-/// Seamlessly integrates with @ppn/nalix-client (WebSocketSession).
+/// Seamlessly integrates with @ppn/nalix-sdk (NalixClient / WebSocketSession).
 /// </summary>
 public sealed class TypeScriptGenerator : ICodeGenerator
 {

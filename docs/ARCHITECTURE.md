@@ -13,7 +13,7 @@ graph TD
     subgraph Clients ["Client SDKs (Transport Sessions)"]
         ClientC["C Client SDK: nalix_session_t / nalix_tcp_session_t"]
         ClientRust["Rust Client SDK: TcpSession / WebSocketSession"]
-        ClientTS["TypeScript Client SDK: WebSocketSession (@ppn/nalix-client)"]
+        ClientTS["TypeScript Client SDK: WebSocketSession (@ppn/nalix-sdk)"]
     end
 
     subgraph Tooling ["Protocol Code Generator (nxproto)"]
