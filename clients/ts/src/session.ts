@@ -129,27 +129,31 @@ export class WebSocketSession extends TransportSession {
         };
 
         ws.onmessage = (event: MessageEvent) => {
-          try {
-            let buffer: Uint8Array;
-            if (event.data instanceof ArrayBuffer) {
-              buffer = new Uint8Array(event.data);
-            } else if (ArrayBuffer.isView(event.data)) {
-              buffer = new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength);
-            } else {
-              return;
-            }
-
-            if (buffer.length > this.config.maxMessageSize) {
-              // Exceeds max allowable frame length; drop frame
-              return;
-            }
-
-            const rawPacket = Packet.decode(buffer);
-            const packet = FramePipeline.processInbound(rawPacket, this._sessionState);
-            this.dispatchInboundPacket(packet);
-          } catch {
-            // Malformed packet dropped
+          let buffer: Uint8Array;
+          if (event.data instanceof ArrayBuffer) {
+            buffer = new Uint8Array(event.data);
+          } else if (ArrayBuffer.isView(event.data)) {
+            buffer = new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength);
+          } else {
+            return; // Not a binary frame
           }
+
+          let rawPacket: Packet | undefined;
+          let packet: Packet;
+          try {
+            if (buffer.length > this.config.maxMessageSize) {
+              throw new NalixStatus(
+                StatusCode.RESOURCE_EXHAUSTED,
+                `Inbound frame of ${buffer.length} bytes exceeds maxMessageSize ${this.config.maxMessageSize}`
+              );
+            }
+            rawPacket = Packet.decode(buffer);
+            packet = FramePipeline.processInbound(rawPacket, this._sessionState);
+          } catch (err: unknown) {
+            this.reportInboundFailure(err, rawPacket);
+            return;
+          }
+          this.dispatchInboundPacket(packet);
         };
       } catch (err: any) {
         if (!settled) {
@@ -161,6 +165,22 @@ export class WebSocketSession extends TransportSession {
         }
       }
     });
+  }
+
+  /**
+   * Surfaces an inbound frame that could not be decoded.
+   * If the frame header was parsed, its sequence ID is used to reject the matching pending request,
+   * so the caller gets the real failure instead of DEADLINE_EXCEEDED. The error is also emitted via onError().
+   */
+  private reportInboundFailure(err: unknown, packet: Packet | undefined): void {
+    const status =
+      err instanceof NalixStatus
+        ? err
+        : new NalixStatus(StatusCode.DATA_LOSS, `Inbound frame rejected: ${(err as Error)?.message ?? String(err)}`);
+    if (packet) {
+      this._pendingRequests.cancel(packet.header.sequenceId, status);
+    }
+    this._subscriptions.dispatchError(status);
   }
 
   protected sendRawFrame(bytes: Uint8Array): void {

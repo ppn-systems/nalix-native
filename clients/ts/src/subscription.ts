@@ -1,8 +1,11 @@
 import { Packet } from './packet.js';
 import { ConnectivityState } from './channel.js';
+import { NalixStatus } from './status.js';
 
 export type PacketCallback = (packet: Packet) => void;
 export type StateCallback = (state: ConnectivityState) => void;
+/** Receives inbound frames that could not be decoded (bad decrypt, bad decompress, malformed). */
+export type ErrorCallback = (error: NalixStatus) => void;
 
 /**
  * Handle returned by subscription methods allowing callers to detach their listeners.
@@ -19,6 +22,17 @@ export class SubscriptionManager {
   private readonly _packetListeners: Set<PacketCallback> = new Set();
   private readonly _stateListeners: Set<StateCallback> = new Set();
   private readonly _opcodeListeners: Map<number, Set<PacketCallback>> = new Map();
+  private readonly _errorListeners: Set<ErrorCallback> = new Set();
+
+  /**
+   * Subscribes to inbound frame decode failures.
+   */
+  public subscribeError(callback: ErrorCallback): Subscription {
+    this._errorListeners.add(callback);
+    return {
+      unsubscribe: () => this._errorListeners.delete(callback),
+    };
+  }
 
   /**
    * Subscribes to all incoming packets.
@@ -95,11 +109,23 @@ export class SubscriptionManager {
   }
 
   /**
+   * Dispatches an inbound frame decode failure to error listeners.
+   */
+  public dispatchError(error: NalixStatus): void {
+    for (const listener of this._errorListeners) {
+      try {
+        listener(error);
+      } catch {}
+    }
+  }
+
+  /**
    * Clears all active subscriptions.
    */
   public clear(): void {
     this._packetListeners.clear();
     this._stateListeners.clear();
     this._opcodeListeners.clear();
+    this._errorListeners.clear();
   }
 }
