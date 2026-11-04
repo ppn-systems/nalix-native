@@ -4,6 +4,19 @@ import { SessionState } from './state.js';
 import { FrameCompression } from './compression.js';
 import { FrameCipher } from './security.js';
 import { NalixStatus, StatusCode } from './status.js';
+import { ProtocolOpCode } from './protocol.js';
+
+/**
+ * Opcodes that are never encrypted by default:
+ * - SESSION_INIT / SESSION_PROOF are handshake frames, sent before the session secret is active.
+ * - SESSION_SIGNAL is the resume frame, sent before a secure connection is re-established.
+ * Matches the Nalix host, which expects these frames in plaintext.
+ */
+const PLAINTEXT_BY_DESIGN_OPCODES: ReadonlySet<number> = new Set<number>([
+  ProtocolOpCode.SESSION_INIT,
+  ProtocolOpCode.SESSION_PROOF,
+  ProtocolOpCode.SESSION_SIGNAL,
+]);
 
 /**
  * Unifies execution of cryptographic and compression transforms for inbound and outbound frames.
@@ -42,11 +55,12 @@ export class FramePipeline {
     }
 
     // 3. Encryption (encrypt after compression)
-    // System frames (opcode < 0x0100) are unencrypted by default unless explicitly specified.
-    // Application frames (opcode >= 0x0100) are encrypted when session encryption is enabled.
+    // Once session encryption is enabled, every frame is encrypted (application and control
+    // frames alike, e.g. PING/TIMESYNC/REKEY), except the handshake/resume frames that are
+    // sent before the secure channel exists. An explicit `encrypt` option always wins.
     const shouldEncrypt = encrypt !== undefined
       ? encrypt
-      : (state.encryptionEnabled && packet.header.opcode >= 0x0100);
+      : (state.encryptionEnabled && !PLAINTEXT_BY_DESIGN_OPCODES.has(packet.header.opcode));
 
     if (shouldEncrypt) {
       if (!state.secret) {

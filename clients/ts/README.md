@@ -123,3 +123,14 @@ The AEAD additional data is `EnvelopeHeader(12) ‖ Nonce(12) ‖ FrameHeader(6)
 encoded after the sequence id is assigned and with the `ENCRYPTED` flag set, matching the Nalix host.
 `FramePipeline` does this automatically. When calling `FrameCipher.encrypt`/`decrypt` directly, pass the
 encoded 6-byte frame header as `userAad`.
+
+### Which frames are encrypted
+
+Once the session secret is active (after `handshake()`, or after resume), every outbound frame is encrypted,
+including control frames such as PING, TIMESYNC, REKEY and DISCONNECT. Two groups are sent in plaintext by design:
+
+- **Handshake frames** (`SESSION_INIT`, `SESSION_PROOF`). They are sent before the session secret is active.
+- **Resume frames** (`SESSION_SIGNAL`). They are sent on a new connection before the secure channel is re-established.
+
+The default can be overridden per frame with the `encrypt` option of `send()` / `request()`, for example
+`session.send(packet, undefined, { encrypt: false })`. `ping()`, `syncTime()` and `rekey()` no longer force plaintext.

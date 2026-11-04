@@ -332,7 +332,6 @@ export abstract class TransportSession implements ITransportSession {
 
     await this.request(pingPacket, {
       timeoutMs,
-      encrypt: false,
       predicate: (incoming) =>
         incoming.header.opcode === ProtocolOpCode.SYSTEM_TIMESYNC &&
         incoming.payload.length > 0 &&
@@ -366,7 +365,6 @@ export abstract class TransportSession implements ITransportSession {
 
     const res = await this.request(reqPacket, {
       timeoutMs,
-      encrypt: false,
       predicate: (incoming) =>
         incoming.header.opcode === ProtocolOpCode.SYSTEM_TIMESYNC &&
         incoming.payload.length >= 9 &&
@@ -434,7 +432,6 @@ export abstract class TransportSession implements ITransportSession {
 
     await this.request(rekeyPacket, {
       timeoutMs,
-      encrypt: false,
       sequenceId: seqId,
       predicate: (incoming) =>
         incoming.header.opcode === ProtocolOpCode.SYSTEM_CONTROL &&
