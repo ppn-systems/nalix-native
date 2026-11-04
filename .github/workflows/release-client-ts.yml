@@ -1,17 +1,19 @@
 name: "Publish: TypeScript SDK"
 
 on:
+  # Only one event may publish a version: a GitHub release also pushes its tag,
+  # so triggering on both `release` and tag `push` raced two `npm publish` runs (E409).
   release:
     types: [published]
-  push:
-    tags:
-      - 'v*'
-      - 'ts-v*'
   workflow_dispatch:
     inputs:
       version:
         description: 'Version to publish (without v prefix, e.g. 0.1.0)'
         required: false
+
+concurrency:
+  group: publish-ts-sdk
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -71,6 +73,10 @@ jobs:
           if [ -n "$NODE_AUTH_TOKEN" ]; then
             echo "Checking npm authenticated user..."
             npm whoami
+            if npm view "@ppnsys/nalix-sdk@${{ env.VERSION }}" version >/dev/null 2>&1; then
+              echo "@ppnsys/nalix-sdk@${{ env.VERSION }} is already on npmjs.org. Skipping."
+              exit 0
+            fi
             echo "Publishing @ppnsys/nalix-sdk to npmjs.org..."
             npm publish --access public
           else
