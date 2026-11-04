@@ -1,6 +1,6 @@
 # Nalix Native TypeScript SDK
 
-The Nalix TypeScript SDK (`@ppn/nalix-sdk`) provides a high-performance binary transport SDK for modern web browsers, Node.js (22+), Next.js, Vite, Deno, and Bun runtimes.
+The Nalix TypeScript SDK (`@ppnsys/nalix-sdk`) provides a high-performance binary transport SDK for modern web browsers, Node.js (22+), Next.js, Vite, Deno, and Bun runtimes.
 
 Directly aligns in naming and architecture with the Nalix C# SDK (`Nalix.SDK`), centering around transport sessions (`NalixClient` / `WebSocketSession`), correlated request/response calls, typed event subscriptions, automatic reconnection, X25519 TOFU handshake, AES-ready ChaCha20-Poly1305 encryption, LZ4 compression, mid-session Rekey, and HMAC-Keccak256 Session Resumption (`SESSION_SIGNAL`).
 
@@ -25,7 +25,7 @@ Directly aligns in naming and architecture with the Nalix C# SDK (`Nalix.SDK`), 
 ## Installation
 
 ```bash
-npm install @ppn/nalix-sdk
+npm install @ppnsys/nalix-sdk
 ```
 
 ---
@@ -35,7 +35,7 @@ npm install @ppn/nalix-sdk
 ### 1. Connect and Authenticate in One Line
 
 ```typescript
-import { NalixClient } from '@ppn/nalix-sdk';
+import { NalixClient } from '@ppnsys/nalix-sdk';
 
 // Automatically connects and establishes a secure authenticated session (or resumes previous session)
 const client = await NalixClient.connect('wss://atmosos.eyc.asia/ws/');

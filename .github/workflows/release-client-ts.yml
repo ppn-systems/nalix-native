@@ -1,0 +1,39 @@
+name: CD Release TypeScript SDK to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'ts-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          registry-url: 'https://registry.npmjs.org'
+          scope: '@${{ vars.NPM_ORG || "ppnsys" }}'
+
+      - name: Install Dependencies
+        working-directory: clients/ts
+        run: npm ci
+
+      - name: Run Test Suite
+        working-directory: clients/ts
+        run: npm test
+
+      - name: Publish to npm registry
+        working-directory: clients/ts
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

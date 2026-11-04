@@ -29,7 +29,7 @@ nalix-native/
 │   ├── rust/                     # Rust client SDK (nalix-client crate)
 │   │   ├── src/                  # Session implementation (TcpSession, WebSocketSession)
 │   │   └── Cargo.toml            # Crate manifest
-│   └── ts/                       # TypeScript / Web client SDK (@ppn/nalix-sdk)
+│   └── ts/                       # TypeScript / Web client SDK (@ppnsys/nalix-sdk)
 │       ├── src/                  # Session implementation (WebSocketSession)
 │       ├── tests/                # Verification test suite
 │       └── package.json          # Package manifest
@@ -116,7 +116,7 @@ cargo test --manifest-path examples/rust/Cargo.toml
 ### 4. TypeScript / Web Client & Codec Test Suite
 
 ```bash
-# Test TypeScript Client SDK (@ppn/nalix-sdk)
+# Test TypeScript Client SDK (@ppnsys/nalix-sdk)
 cd clients/ts && npm test
 
 # Test generated TypeScript codecs

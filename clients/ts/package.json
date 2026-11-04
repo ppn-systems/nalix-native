@@ -1,5 +1,5 @@
 {
-  "name": "@ppn/nalix-sdk",
+  "name": "@ppnsys/nalix-sdk",
   "version": "0.1.0",
   "description": "Nalix Native TypeScript / JavaScript Client SDK for Web Browsers and Node.js runtimes",
   "type": "module",
