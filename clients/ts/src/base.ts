@@ -34,13 +34,20 @@ export interface ITransportSession {
   close(): void;
 
   send(packetOrOpcode: Packet | number, payload?: PayloadLike, options?: PacketCreateOptions): number;
+  sendJson(opcode: number, data: any, options?: PacketCreateOptions): number;
   request(
     packetOrOpcode: Packet | number,
     payloadOrOptions?: PayloadLike | RequestOptions,
     maybeOptions?: RequestOptions
   ): Promise<Packet>;
+  requestJson<TResponse = any, TRequest = any>(
+    opcode: number,
+    payload?: TRequest,
+    options?: RequestOptions
+  ): Promise<TResponse>;
 
   on(opcode: number, callback: PacketCallback): Subscription;
+  onJson<T = any>(opcode: number, callback: (data: T, packet: Packet) => void): Subscription;
   once(opcode: number, callback: PacketCallback): Subscription;
   onPacket(callback: PacketCallback): Subscription;
   onStateChange(callback: StateCallback): Subscription;
@@ -466,6 +473,37 @@ export abstract class TransportSession implements ITransportSession {
       flags: PacketFlags.SYSTEM,
       priority: PacketPriority.HIGH,
       sequenceId,
+    });
+  }
+
+  /**
+   * Shorthand to serialize an object to JSON and send it over the active session.
+   */
+  public sendJson(opcode: number, data: any, options?: PacketCreateOptions): number {
+    return this.send(opcode, data, options);
+  }
+
+  /**
+   * Shorthand to send a request (with automatic JSON serialization) and parse the response JSON.
+   */
+  public async requestJson<TResponse = any, TRequest = any>(
+    opcode: number,
+    payload?: TRequest,
+    options?: RequestOptions
+  ): Promise<TResponse> {
+    const response = await this.request(opcode, payload as PayloadLike, options);
+    return response.json<TResponse>();
+  }
+
+  /**
+   * Subscribes to an OpCode and automatically parses incoming payload as JSON.
+   */
+  public onJson<T = any>(opcode: number, callback: (data: T, packet: Packet) => void): Subscription {
+    return this.on(opcode, (packet) => {
+      try {
+        const data = packet.json<T>();
+        callback(data, packet);
+      } catch {}
     });
   }
 }

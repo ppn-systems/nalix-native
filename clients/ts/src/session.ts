@@ -38,6 +38,23 @@ export class WebSocketSession extends TransportSession {
   }
 
   /**
+   * High-level static factory to create, connect, and optionally handshake/resume in a single call.
+   * Example:
+   *   const client = await WebSocketSession.connect('wss://atmosos.eyc.asia/ws/');
+   */
+  public static async connect(
+    options: ChannelConfig | WebSocketSessionOptions | string,
+    connectOptions?: { autoHandshake?: boolean }
+  ): Promise<WebSocketSession> {
+    const session = new WebSocketSession(options);
+    await session.connect();
+    if (connectOptions?.autoHandshake !== false) {
+      await session.connectWithResume();
+    }
+    return session;
+  }
+
+  /**
    * Establishes the WebSocket transport connection.
    */
   public async connect(): Promise<void> {

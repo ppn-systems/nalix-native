@@ -13,3 +13,6 @@ export * from './resume.js';
 export * from './base.js';
 export * from './pipeline.js';
 export * from './session.js';
+
+// Ergonomic alias for familiar client naming
+export { WebSocketSession as NalixClient } from './session.js';

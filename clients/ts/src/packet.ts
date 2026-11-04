@@ -74,7 +74,7 @@ export class PacketHeader {
   }
 }
 
-export type PayloadLike = Uint8Array | ArrayBuffer | string | null | undefined;
+export type PayloadLike = Uint8Array | ArrayBuffer | string | Record<string, any> | any[] | object | null | undefined;
 
 export interface PacketCreateOptions {
   flags?: number;
@@ -93,6 +93,38 @@ export class Packet {
   constructor(header: PacketHeader, payload: Uint8Array = new Uint8Array(0)) {
     this.header = header;
     this.payload = payload;
+  }
+
+  /** OpCode of this packet. */
+  public get opcode(): number {
+    return this.header.opcode;
+  }
+  public set opcode(val: number) {
+    this.header.opcode = val;
+  }
+
+  /** Correlated sequence ID of this packet. */
+  public get sequenceId(): number {
+    return this.header.sequenceId;
+  }
+  public set sequenceId(val: number) {
+    this.header.sequenceId = val;
+  }
+
+  /** Packet bitwise flags. */
+  public get flags(): number {
+    return this.header.flags;
+  }
+  public set flags(val: number) {
+    this.header.flags = val;
+  }
+
+  /** Priority level of this packet. */
+  public get priority(): number {
+    return this.header.priority;
+  }
+  public set priority(val: number) {
+    this.header.priority = val;
   }
 
   /**
@@ -135,6 +167,7 @@ export class Packet {
 
   /**
    * High-level factory method to create a Packet without manual header instantiation.
+   * Automatically serializes objects and arrays to JSON strings.
    */
   public static create(opcode: number, payload?: PayloadLike, options?: PacketCreateOptions): Packet {
     let body: Uint8Array;
@@ -146,6 +179,8 @@ export class Packet {
       body = payload;
     } else if (payload instanceof ArrayBuffer) {
       body = new Uint8Array(payload);
+    } else if (typeof payload === 'object') {
+      body = new TextEncoder().encode(JSON.stringify(payload));
     } else {
       body = new Uint8Array(0);
     }
@@ -160,7 +195,7 @@ export class Packet {
   }
 
   /**
-   * Factory method to create a Packet with a JSON-serialized payload.
+   * Factory method to create a Packet with an explicit JSON-serialized payload.
    */
   public static fromJson(opcode: number, obj: any, options?: PacketCreateOptions): Packet {
     const jsonStr = JSON.stringify(obj);
