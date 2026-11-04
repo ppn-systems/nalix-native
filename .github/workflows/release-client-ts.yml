@@ -69,6 +69,8 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -n "$NODE_AUTH_TOKEN" ]; then
+            echo "Checking npm authenticated user..."
+            npm whoami
             echo "Publishing @ppnsys/nalix-sdk to npmjs.org..."
             npm publish --access public
           else
