@@ -10,6 +10,7 @@ import {
   FrameCipher,
   EnvelopeHeader,
   ENVELOPE_HEADER_SIZE,
+  NALIX_HEADER_SIZE,
   ENVELOPE_MAGIC,
   CipherSuiteType,
   FramePipeline,
@@ -154,4 +155,27 @@ test('FramePipeline auto-assigns sequenceId and performs compress + encrypt outb
   assert.equal(restored.header.flags & PacketFlags.COMPRESSED, 0, 'COMPRESSED flag should be cleared after decompression');
   assert.equal(restored.header.flags & PacketFlags.ENCRYPTED, 0, 'ENCRYPTED flag should be cleared after decryption');
   assert.deepEqual(restored.payload, originalPayload, 'Restored payload must match original');
+});
+
+test('FramePipeline authenticates the 6-byte frame header in the AEAD AAD', () => {
+  const config = new ChannelConfig({ compressionEnabled: false });
+  const state = new SessionState();
+  const key = new Uint8Array(32);
+  crypto.getRandomValues(key);
+  state.secret = key;
+  state.encryptionEnabled = true;
+
+  const body = new TextEncoder().encode('hello host');
+  const packet = new Packet(new PacketHeader(0x0500, 0, 0, 0), body);
+  const processed = FramePipeline.processOutbound(packet, config, state, () => 7, () => 1);
+
+  const frameHeader = processed.encode().subarray(0, NALIX_HEADER_SIZE);
+  // Host layout: EnvelopeHeader12 || Nonce || FrameHeader6
+  assert.deepEqual(FrameCipher.decrypt(processed.payload, key, frameHeader).plaintext, body);
+  assert.throws(() => FrameCipher.decrypt(processed.payload, key));
+
+  // Tampering with the frame header must fail authentication inbound.
+  const tampered = Packet.decode(processed.encode());
+  tampered.header.opcode = 0x0501;
+  assert.throws(() => FramePipeline.processInbound(tampered, state));
 });

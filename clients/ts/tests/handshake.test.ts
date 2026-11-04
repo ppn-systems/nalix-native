@@ -154,12 +154,13 @@ class MockServerHandshakeSession extends TransportSession {
       view.setBigUint64(32, this.derivedServerToken, true);
 
       // Server encrypts SessionEstablished
-      const encryptedPayload = FrameCipher.encrypt(establishedPayload, this.derivedServerSessionKey!, 1);
+      // (AAD = EnvelopeHeader || Nonce || FrameHeader6, matching the Nalix host)
+      const establishedHeader = new PacketHeader(ProtocolOpCode.SESSION_ESTABLISHED, PacketFlags.ENCRYPTED, 0, packet.header.sequenceId);
+      const frameHeader = new Uint8Array(6);
+      establishedHeader.encode(frameHeader, 0);
+      const encryptedPayload = FrameCipher.encrypt(establishedPayload, this.derivedServerSessionKey!, 1, undefined, frameHeader);
 
-      const establishedPacket = new Packet(
-        new PacketHeader(ProtocolOpCode.SESSION_ESTABLISHED, PacketFlags.ENCRYPTED, 0, packet.header.sequenceId),
-        encryptedPayload
-      );
+      const establishedPacket = new Packet(establishedHeader, encryptedPayload);
 
       setTimeout(() => {
         const decoded = FramePipeline.processInbound(establishedPacket, this.sessionState);
