@@ -1,13 +1,17 @@
 name: CD Release NXProto Tool
 
 on:
-  release:
-    types: [published]
+  # Tag push only: publishing a GitHub release also pushes its tag, so listening to
+  # both `release` and `push: tags` ran this workflow twice for one release.
   push:
     tags:
       - 'v*'
       - 'nxproto-v*'
   workflow_dispatch:
+
+concurrency:
+  group: release-nxproto-${{ github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: write

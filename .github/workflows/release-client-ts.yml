@@ -23,6 +23,11 @@ jobs:
   publish:
     name: "Publish TypeScript SDK (@ppnsys/nalix-sdk)"
     runs-on: ubuntu-latest
+    # Only SDK releases: `v*` (whole repo) or `ts-v*`. Skip e.g. `nxproto-v*` releases.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'v') ||
+      startsWith(github.event.release.tag_name, 'ts-v')
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -40,6 +45,7 @@ jobs:
             version="${{ github.event.inputs.version }}"
           elif [ "${{ github.event_name }}" == "release" ]; then
             version="${{ github.event.release.tag_name }}"
+            version="${version#ts-}"
             version="${version#v}"
           elif [ -n "${{ github.ref_name }}" ]; then
             version="${GITHUB_REF_NAME#v}"
