@@ -3,8 +3,27 @@
   "version": "0.1.0",
   "description": "Nalix Native TypeScript / JavaScript Client SDK for Web Browsers and Node.js runtimes",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ppn-systems/nalix-native.git",
+    "directory": "clients/ts"
+  },
   "scripts": {
     "build": "tsc",
     "test": "tsc && node --test dist/tests/**/*.test.js",
@@ -12,6 +31,7 @@
   },
   "keywords": [
     "nalix",
+    "nalix-sdk",
     "binary-protocol",
     "websocket",
     "browser",
