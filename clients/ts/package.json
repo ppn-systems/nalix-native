@@ -21,7 +21,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ppn-systems/nalix-native.git",
+    "url": "git+https://github.com/ppn-systems/nalix-native.git",
     "directory": "clients/ts"
   },
   "scripts": {
