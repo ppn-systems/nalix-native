@@ -1,4 +1,4 @@
-import { Packet, PacketFlags } from './packet.js';
+import { Packet, PacketFlags, NALIX_HEADER_SIZE } from './packet.js';
 import { ChannelConfig } from './channel.js';
 import { SessionState } from './state.js';
 import { FrameCompression } from './compression.js';
@@ -53,9 +53,15 @@ export class FramePipeline {
         throw new NalixStatus(StatusCode.FAILED_PRECONDITION, 'Encryption requested but no session secret configured');
       }
 
-      const seq = nextSeq32();
-      payload = FrameCipher.encrypt(payload, state.secret, seq, config.algorithm);
       flags |= PacketFlags.ENCRYPTED;
+      packet.header.flags = flags;
+
+      // AAD = EnvelopeHeader(12) || Nonce(12) || FrameHeader(6). The frame header is
+      // encoded after the sequence id is assigned and the ENCRYPTED flag is set, which
+      // is exactly what goes on the wire and what the host authenticates.
+      const frameHeader = FramePipeline.encodeHeader(packet);
+      const seq = nextSeq32();
+      payload = FrameCipher.encrypt(payload, state.secret, seq, config.algorithm, frameHeader);
     }
 
     packet.header.flags = flags;
@@ -78,7 +84,8 @@ export class FramePipeline {
         throw new NalixStatus(StatusCode.UNAUTHENTICATED, 'Received encrypted packet but no session secret configured');
       }
 
-      const res = FrameCipher.decrypt(payload, state.secret);
+      // Authenticate the frame header as received (ENCRYPTED flag still set).
+      const res = FrameCipher.decrypt(payload, state.secret, FramePipeline.encodeHeader(packet));
       payload = res.plaintext;
       flags &= ~PacketFlags.ENCRYPTED;
     }
@@ -92,5 +99,12 @@ export class FramePipeline {
     packet.header.flags = flags;
     packet.payload = payload;
     return packet;
+  }
+
+  /** Encodes the 6-byte frame header used as the trailing AAD component. */
+  private static encodeHeader(packet: Packet): Uint8Array {
+    const buf = new Uint8Array(NALIX_HEADER_SIZE);
+    packet.header.encode(buf, 0);
+    return buf;
   }
 }

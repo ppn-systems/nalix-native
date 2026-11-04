@@ -115,3 +115,11 @@ console.log(`Session resumed: ${resumed}`);
 cd clients/ts
 npm test
 ```
+
+## Encrypted frame layout
+
+Encrypted payloads are ChaCha20-Poly1305 envelopes: `EnvelopeHeader(12) ‖ Nonce(12) ‖ Ciphertext ‖ Tag(16)`.
+The AEAD additional data is `EnvelopeHeader(12) ‖ Nonce(12) ‖ FrameHeader(6)`, where the frame header is
+encoded after the sequence id is assigned and with the `ENCRYPTED` flag set, matching the Nalix host.
+`FramePipeline` does this automatically. When calling `FrameCipher.encrypt`/`decrypt` directly, pass the
+encoded 6-byte frame header as `userAad`.
