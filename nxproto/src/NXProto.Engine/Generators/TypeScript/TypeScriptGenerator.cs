@@ -115,25 +115,47 @@ public sealed class TypeScriptGenerator : ICodeGenerator
 
         // encode() method
         _ = sb.AppendLine("  public encode(): Uint8Array {");
+
+        // Per-field pre-encoding lives in the method scope so the size pass and the write pass both see it.
+        foreach (FieldSchema f in packet.Fields)
+        {
+            string c = ToCamelCase(f.Name);
+            if (IsStringField(f))
+            {
+                AppendInvariant(sb, $"    const {c}Bytes = new TextEncoder().encode(this.{c});");
+            }
+            else if (IsArrayField(f) && GetArrayElementKind(f) == ArrayElementKind.String)
+            {
+                AppendInvariant(sb, $"    const {c}Items = this.{c}.map((s) => new TextEncoder().encode(s));");
+            }
+        }
+
         if (packet.HasVariableFields)
         {
             AppendInvariant(sb, $"    let totalSize = {name}.FIXED_SIZE;");
             foreach (FieldSchema f in packet.Fields)
             {
-                string prop = $"this.{ToCamelCase(f.Name)}";
+                string c = ToCamelCase(f.Name);
+                string prop = $"this.{c}";
                 if (IsStringField(f))
                 {
-                    AppendInvariant(sb, $"    const {ToCamelCase(f.Name)}Bytes = new TextEncoder().encode({prop});");
-                    AppendInvariant(sb, $"    totalSize += 4 + {ToCamelCase(f.Name)}Bytes.byteLength;");
+                    AppendInvariant(sb, $"    totalSize += 4 + {c}Bytes.byteLength;");
                 }
                 else if (IsDynamicBytesField(f))
                 {
                     AppendInvariant(sb, $"    totalSize += 4 + {prop}.byteLength;");
                 }
-                else if (IsDynamicArrayField(f))
+                else if (IsArrayField(f))
                 {
-                    int elemSize = GetArrayElementSize(f);
-                    AppendInvariant(sb, $"    totalSize += 4 + ({prop}.length * {elemSize});");
+                    ArrayElementKind kind = GetArrayElementKind(f);
+                    if (kind == ArrayElementKind.String)
+                    {
+                        AppendInvariant(sb, $"    totalSize += 4 + {c}Items.reduce((n, b) => n + 4 + b.byteLength, 0);");
+                    }
+                    else
+                    {
+                        AppendInvariant(sb, $"    totalSize += 4 + ({prop}.length * {ArrayElementWireSize(kind)});");
+                    }
                 }
             }
             _ = sb.AppendLine("    const buffer = new Uint8Array(totalSize);");
@@ -200,6 +222,10 @@ public sealed class TypeScriptGenerator : ICodeGenerator
             _ = sb.AppendLine("    offset += 4;");
             AppendInvariant(sb, $"    buffer.set({bytesVar}, offset);");
             AppendInvariant(sb, $"    offset += {bytesVar}.byteLength;");
+        }
+        else if (IsArrayField(f))
+        {
+            WriteEncodeArray(sb, f);
         }
         else if (IsFixedByteArray(f))
         {
@@ -305,6 +331,10 @@ public sealed class TypeScriptGenerator : ICodeGenerator
             _ = sb.AppendLine("    offset += 4;");
             AppendInvariant(sb, $"    {prop} = {ToCamelCase(f.Name)}Len > 0 ? new TextDecoder().decode(buffer.subarray(offset, offset + {ToCamelCase(f.Name)}Len)) : \"\";");
             AppendInvariant(sb, $"    offset += {ToCamelCase(f.Name)}Len;");
+        }
+        else if (IsArrayField(f))
+        {
+            WriteDecodeArray(sb, f);
         }
         else if (IsFixedByteArray(f))
         {
@@ -423,6 +453,14 @@ public sealed class TypeScriptGenerator : ICodeGenerator
                 {
                     AppendInvariant(sb, $"  pkt.{ToCamelCase(f.Name)}.fill(0x5a);");
                 }
+                else if (IsDynamicBytesField(f))
+                {
+                    AppendInvariant(sb, $"  pkt.{ToCamelCase(f.Name)} = new Uint8Array([1, 2, 3, 0xfe]);");
+                }
+                else if (IsArrayField(f))
+                {
+                    AppendInvariant(sb, $"  pkt.{ToCamelCase(f.Name)} = {ArrayTestSample(GetArrayElementKind(f))};");
+                }
                 else if (f.CSharpType is "bool" or "System.Boolean")
                 {
                     AppendInvariant(sb, $"  pkt.{ToCamelCase(f.Name)} = true;");
@@ -449,7 +487,7 @@ public sealed class TypeScriptGenerator : ICodeGenerator
                     AppendInvariant(sb, $"  assert.equal(decoded.{prop}.opcode, P.{name}.OPCODE);");
                     AppendInvariant(sb, $"  assert.equal(decoded.{prop}.sequenceId, 42);");
                 }
-                else if (IsFixedByteArray(f))
+                else if (IsFixedByteArray(f) || IsDynamicBytesField(f) || IsArrayField(f))
                 {
                     AppendInvariant(sb, $"  assert.deepEqual(decoded.{prop}, pkt.{prop});");
                 }
@@ -481,6 +519,10 @@ public sealed class TypeScriptGenerator : ICodeGenerator
         else if (IsFixedByteArray(f) || IsDynamicBytesField(f))
         {
             baseType = "Uint8Array";
+        }
+        else if (IsArrayField(f))
+        {
+            baseType = $"{ArrayElementTsType(GetArrayElementKind(f))}[]";
         }
         else if (f.CSharpType is "bool" or "System.Boolean")
         {
@@ -525,6 +567,11 @@ public sealed class TypeScriptGenerator : ICodeGenerator
             return "new Uint8Array(0)";
         }
 
+        if (IsArrayField(f))
+        {
+            return "[]";
+        }
+
         if (f.CSharpType is "bool" or "System.Boolean")
         {
             return "false";
@@ -539,20 +586,243 @@ public sealed class TypeScriptGenerator : ICodeGenerator
     }
 
     private static bool IsStringField(FieldSchema f) =>
-        f.CType == ProtocolConstants.StringCType || f.CSharpType is "string" or "System.String";
+        f.CSharpType is "string" or "System.String" ||
+        (f.CType == ProtocolConstants.StringCType && !IsByteArrayField(f) && !IsArrayField(f));
 
     private static bool IsFixedByteArray(FieldSchema f) =>
         f.CSharpType == ProtocolConstants.Bytes32FullName ||
         f.RustType.StartsWith("[u8; ", StringComparison.Ordinal) ||
         (f.Size > 8 && f.CType != ProtocolConstants.StringCType);
 
+    // byte[] is a length-prefixed raw payload: [int32 length][bytes] -> Uint8Array.
+    private static bool IsByteArrayField(FieldSchema f) =>
+        f.CSharpType is "byte[]" or "System.Byte[]";
+
     private static bool IsDynamicBytesField(FieldSchema f) =>
-        f.RustType == "Vec<u8>" && f.CType != ProtocolConstants.StringCType;
+        IsByteArrayField(f) ||
+        (f.RustType == "Vec<u8>" && f.CType != ProtocolConstants.StringCType && !IsArrayField(f));
 
-    private static bool IsDynamicArrayField(FieldSchema f) =>
-        f.RustType.StartsWith("Vec<", StringComparison.Ordinal) && f.RustType != "Vec<u8>";
+    // Any other array or generic list: [int32 count][count elements], see docs/SPECIFICATION.md §2.5.2.
+    private static bool IsArrayField(FieldSchema f) =>
+        !IsByteArrayField(f) && GetCollectionElementType(f.CSharpType) is not null;
 
-    private static int GetArrayElementSize(FieldSchema f) => 4;
+    private static readonly string[] GenericCollectionPrefixes =
+    [
+        "System.Collections.Generic.List<",
+        "System.Collections.Generic.IList<",
+        "System.Collections.Generic.IReadOnlyList<",
+        "System.Collections.Generic.HashSet<",
+        "List<",
+        "IList<",
+        "IReadOnlyList<",
+        "HashSet<",
+    ];
+
+    private static string? GetCollectionElementType(string csharpType)
+    {
+        if (csharpType.EndsWith("[]", StringComparison.Ordinal))
+        {
+            return csharpType[..^2];
+        }
+
+        foreach (string prefix in GenericCollectionPrefixes)
+        {
+            if (csharpType.StartsWith(prefix, StringComparison.Ordinal) && csharpType.EndsWith('>'))
+            {
+                return csharpType[prefix.Length..^1];
+            }
+        }
+
+        return null;
+    }
+
+    private enum ArrayElementKind
+    {
+        Int8,
+        UInt8,
+        Bool,
+        Int16,
+        UInt16,
+        Int32,
+        UInt32,
+        Float32,
+        Float64,
+        Int64,
+        UInt64,
+        Guid16,
+        String,
+    }
+
+    /// <summary>
+    /// Resolves the wire layout of one array element. C# names are checked first so that
+    /// <c>Guid</c> (C-side <c>ByteArray</c>) and <c>bool</c> are not confused with byte elements.
+    /// </summary>
+    private static ArrayElementKind GetArrayElementKind(FieldSchema f)
+    {
+        string elem = GetCollectionElementType(f.CSharpType)
+            ?? throw new InvalidOperationException($"Field '{f.Name}' is not an array or collection.");
+
+        switch (elem)
+        {
+            case "string" or "System.String":
+                return ArrayElementKind.String;
+            case "System.Guid" or "Guid":
+                return ArrayElementKind.Guid16;
+            case "bool" or "System.Boolean":
+                return ArrayElementKind.Bool;
+            case "sbyte" or "System.SByte":
+                return ArrayElementKind.Int8;
+            case "byte" or "System.Byte":
+                return ArrayElementKind.UInt8;
+            case "short" or "System.Int16":
+                return ArrayElementKind.Int16;
+            case "ushort" or "System.UInt16" or "char" or "System.Char":
+                return ArrayElementKind.UInt16;
+            case "int" or "System.Int32":
+                return ArrayElementKind.Int32;
+            case "uint" or "System.UInt32":
+                return ArrayElementKind.UInt32;
+            case "float" or "System.Single":
+                return ArrayElementKind.Float32;
+            case "double" or "System.Double":
+                return ArrayElementKind.Float64;
+            case "long" or "System.Int64":
+                return ArrayElementKind.Int64;
+            case "ulong" or "System.UInt64":
+                return ArrayElementKind.UInt64;
+        }
+
+        // Enums and other element types: fall back to the C element layout chosen by TypeResolver.
+        return f.CType switch
+        {
+            "StringArray" => ArrayElementKind.String,
+            "Int8Array" => ArrayElementKind.Int8,
+            "ByteArray" => ArrayElementKind.UInt8,
+            "Int16Array" => ArrayElementKind.Int16,
+            "UInt16Array" => ArrayElementKind.UInt16,
+            "Int32Array" => ArrayElementKind.Int32,
+            "UInt32Array" => ArrayElementKind.UInt32,
+            "FloatArray" => ArrayElementKind.Float32,
+            "DoubleArray" => ArrayElementKind.Float64,
+            "Int64Array" => ArrayElementKind.Int64,
+            "UInt64Array" => ArrayElementKind.UInt64,
+            _ => throw new NotSupportedException(
+                $"TypeScript generator: unsupported array element type '{elem}' for field '{f.Name}'."),
+        };
+    }
+
+    private static string ArrayElementTsType(ArrayElementKind kind) => kind switch
+    {
+        ArrayElementKind.Bool => "boolean",
+        ArrayElementKind.Int64 or ArrayElementKind.UInt64 => "bigint",
+        ArrayElementKind.String => "string",
+        ArrayElementKind.Guid16 => "Uint8Array",
+        _ => "number",
+    };
+
+    private static int ArrayElementWireSize(ArrayElementKind kind) => kind switch
+    {
+        ArrayElementKind.Int8 or ArrayElementKind.UInt8 or ArrayElementKind.Bool => 1,
+        ArrayElementKind.Int16 or ArrayElementKind.UInt16 => 2,
+        ArrayElementKind.Int32 or ArrayElementKind.UInt32 or ArrayElementKind.Float32 => 4,
+        ArrayElementKind.Int64 or ArrayElementKind.UInt64 or ArrayElementKind.Float64 => 8,
+        ArrayElementKind.Guid16 => 16,
+        _ => 0,
+    };
+
+    private static string ArrayElementWriteStatement(ArrayElementKind kind) => kind switch
+    {
+        ArrayElementKind.Int8 => "view.setInt8(offset++, item);",
+        ArrayElementKind.UInt8 => "view.setUint8(offset++, item);",
+        ArrayElementKind.Bool => "view.setUint8(offset++, item ? 1 : 0);",
+        ArrayElementKind.Int16 => "view.setInt16(offset, item, true); offset += 2;",
+        ArrayElementKind.UInt16 => "view.setUint16(offset, item, true); offset += 2;",
+        ArrayElementKind.Int32 => "view.setInt32(offset, item, true); offset += 4;",
+        ArrayElementKind.UInt32 => "view.setUint32(offset, item, true); offset += 4;",
+        ArrayElementKind.Float32 => "view.setFloat32(offset, item, true); offset += 4;",
+        ArrayElementKind.Float64 => "view.setFloat64(offset, item, true); offset += 8;",
+        ArrayElementKind.Int64 => "view.setBigInt64(offset, BigInt(item), true); offset += 8;",
+        ArrayElementKind.UInt64 => "view.setBigUint64(offset, BigInt(item), true); offset += 8;",
+        ArrayElementKind.Guid16 => "buffer.set(item, offset); offset += 16;",
+        _ => throw new InvalidOperationException("String elements are written through their encoded byte arrays."),
+    };
+
+    private static string ArrayElementReadExpression(ArrayElementKind kind) => kind switch
+    {
+        ArrayElementKind.Int8 => "view.getInt8(offset)",
+        ArrayElementKind.UInt8 => "view.getUint8(offset)",
+        ArrayElementKind.Bool => "view.getUint8(offset) !== 0",
+        ArrayElementKind.Int16 => "view.getInt16(offset, true)",
+        ArrayElementKind.UInt16 => "view.getUint16(offset, true)",
+        ArrayElementKind.Int32 => "view.getInt32(offset, true)",
+        ArrayElementKind.UInt32 => "view.getUint32(offset, true)",
+        ArrayElementKind.Float32 => "view.getFloat32(offset, true)",
+        ArrayElementKind.Float64 => "view.getFloat64(offset, true)",
+        ArrayElementKind.Int64 => "view.getBigInt64(offset, true)",
+        ArrayElementKind.UInt64 => "view.getBigUint64(offset, true)",
+        ArrayElementKind.Guid16 => "buffer.slice(offset, offset + 16)",
+        _ => throw new InvalidOperationException("String elements are read through their length prefix."),
+    };
+
+    private static void WriteEncodeArray(StringBuilder sb, FieldSchema f)
+    {
+        string c = ToCamelCase(f.Name);
+        ArrayElementKind kind = GetArrayElementKind(f);
+
+        if (kind == ArrayElementKind.String)
+        {
+            AppendInvariant(sb, $"    view.setInt32(offset, this.{c}.length, true);");
+            _ = sb.AppendLine("    offset += 4;");
+            AppendInvariant(sb, $"    for (const item of {c}Items) {{");
+            _ = sb.AppendLine("      view.setInt32(offset, item.byteLength, true);");
+            _ = sb.AppendLine("      offset += 4;");
+            _ = sb.AppendLine("      buffer.set(item, offset);");
+            _ = sb.AppendLine("      offset += item.byteLength;");
+            _ = sb.AppendLine("    }");
+            return;
+        }
+
+        AppendInvariant(sb, $"    view.setInt32(offset, this.{c}.length, true);");
+        _ = sb.AppendLine("    offset += 4;");
+        AppendInvariant(sb, $"    for (const item of this.{c}) {{");
+        AppendInvariant(sb, $"      {ArrayElementWriteStatement(kind)}");
+        _ = sb.AppendLine("    }");
+    }
+
+    private static void WriteDecodeArray(StringBuilder sb, FieldSchema f)
+    {
+        string c = ToCamelCase(f.Name);
+        string arr = $"{c}Arr";
+        ArrayElementKind kind = GetArrayElementKind(f);
+
+        AppendInvariant(sb, $"    const {c}Count = Math.max(0, view.getInt32(offset, true));");
+        _ = sb.AppendLine("    offset += 4;");
+        AppendInvariant(sb, $"    const {arr}: {ArrayElementTsType(kind)}[] = [];");
+        AppendInvariant(sb, $"    for (let i = 0; i < {c}Count; i++) {{");
+        if (kind == ArrayElementKind.String)
+        {
+            _ = sb.AppendLine("      const itemLen = view.getInt32(offset, true);");
+            _ = sb.AppendLine("      offset += 4;");
+            AppendInvariant(sb, $"      {arr}.push(new TextDecoder().decode(buffer.subarray(offset, offset + itemLen)));");
+            _ = sb.AppendLine("      offset += itemLen;");
+        }
+        else
+        {
+            AppendInvariant(sb, $"      {arr}.push({ArrayElementReadExpression(kind)});");
+            AppendInvariant(sb, $"      offset += {ArrayElementWireSize(kind)};");
+        }
+        _ = sb.AppendLine("    }");
+        AppendInvariant(sb, $"    pkt.{c} = {arr};");
+    }
+
+    private static string ArrayTestSample(ArrayElementKind kind) => kind switch
+    {
+        ArrayElementKind.String => "['test-string-payload']",
+        ArrayElementKind.Guid16 => "[new Uint8Array(16).fill(0x5a)]",
+        ArrayElementKind.Bool => "[true, false]",
+        ArrayElementKind.Int64 or ArrayElementKind.UInt64 => "[123456789012345678n, 42n]",
+        _ => "[42, 7]",
+    };
 
     private static int CalculateFixedSize(PacketSchema packet)
     {
