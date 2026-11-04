@@ -1,17 +1,19 @@
 name: "Publish: TypeScript SDK"
 
 on:
+  # Only one event may publish a version: a GitHub release also pushes its tag,
+  # so triggering on both `release` and tag `push` raced two `npm publish` runs (E409).
   release:
     types: [published]
-  push:
-    tags:
-      - 'v*'
-      - 'ts-v*'
   workflow_dispatch:
     inputs:
       version:
         description: 'Version to publish (without v prefix, e.g. 0.1.0)'
         required: false
+
+concurrency:
+  group: publish-ts-sdk
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -21,6 +23,11 @@ jobs:
   publish:
     name: "Publish TypeScript SDK (@ppnsys/nalix-sdk)"
     runs-on: ubuntu-latest
+    # Only SDK releases: `v*` (whole repo) or `ts-v*`. Skip e.g. `nxproto-v*` releases.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'v') ||
+      startsWith(github.event.release.tag_name, 'ts-v')
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -38,6 +45,7 @@ jobs:
             version="${{ github.event.inputs.version }}"
           elif [ "${{ github.event_name }}" == "release" ]; then
             version="${{ github.event.release.tag_name }}"
+            version="${version#ts-}"
             version="${version#v}"
           elif [ -n "${{ github.ref_name }}" ]; then
             version="${GITHUB_REF_NAME#v}"
@@ -71,6 +79,10 @@ jobs:
           if [ -n "$NODE_AUTH_TOKEN" ]; then
             echo "Checking npm authenticated user..."
             npm whoami
+            if npm view "@ppnsys/nalix-sdk@${{ env.VERSION }}" version >/dev/null 2>&1; then
+              echo "@ppnsys/nalix-sdk@${{ env.VERSION }} is already on npmjs.org. Skipping."
+              exit 0
+            fi
             echo "Publishing @ppnsys/nalix-sdk to npmjs.org..."
             npm publish --access public
           else
