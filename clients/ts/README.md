@@ -77,6 +77,14 @@ const sub = client.onJson<ChatMessage>(0x0300, (msg, packet) => {
 sub.unsubscribe();
 ```
 
+Inbound frames that cannot be decrypted, decompressed or parsed are reported through `onError`. If the frame's sequence ID matches an in-flight request, that request rejects with the same `NalixStatus` (for example `DATA_LOSS`) instead of timing out:
+
+```typescript
+client.onError((err) => {
+  console.warn(`Dropped inbound frame: ${err.code} ${err.message}`);
+});
+```
+
 ### 4. Fire-and-Forget Send
 
 ```typescript

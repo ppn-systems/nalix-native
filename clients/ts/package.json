@@ -1,6 +1,6 @@
 {
   "name": "@ppnsys/nalix-sdk",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Nalix Native TypeScript / JavaScript Client SDK for Web Browsers and Node.js runtimes",
   "type": "module",
   "main": "./dist/src/index.js",
@@ -40,14 +40,12 @@
   "author": "PPN Systems",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@types/lz4js": "^0.2.2",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
   },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
-    "@noble/hashes": "^2.4.0",
-    "lz4js": "^0.2.0"
+    "@noble/hashes": "^2.4.0"
   }
 }

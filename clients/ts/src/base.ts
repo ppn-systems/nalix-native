@@ -3,7 +3,7 @@ import { Packet, PacketCreateOptions, PayloadLike, PacketFlags, PacketPriority }
 import { ControlType, ProtocolOpCode, ProtocolReason } from './protocol.js';
 import { NalixStatus, StatusCode } from './status.js';
 import { SessionState } from './state.js';
-import { Subscription, PacketCallback, StateCallback, SubscriptionManager } from './subscription.js';
+import { Subscription, PacketCallback, StateCallback, ErrorCallback, SubscriptionManager } from './subscription.js';
 import { PendingRequestManager, RequestOptions } from './pending.js';
 import { FramePipeline } from './pipeline.js';
 import { performHandshake, HandshakeOptions, HandshakeResult, HandshakeX25519 } from './handshake.js';
@@ -159,6 +159,14 @@ export abstract class TransportSession implements ITransportSession {
 
   public onStateChange(callback: StateCallback): Subscription {
     return this._subscriptions.subscribeState(callback);
+  }
+
+  /**
+   * Subscribes to inbound frames that failed to decrypt, decompress or parse.
+   * When the frame's sequence ID is known, the matching pending request is rejected too.
+   */
+  public onError(callback: ErrorCallback): Subscription {
+    return this._subscriptions.subscribeError(callback);
   }
 
   public on(opcode: number, callback: PacketCallback): Subscription {
