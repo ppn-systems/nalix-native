@@ -116,7 +116,7 @@ cargo test --manifest-path examples/rust/Cargo.toml
 ### 4. TypeScript / Web Client & Codec Test Suite
 
 ```bash
-# Test TypeScript Client SDK (@ppnsys/nalix-sdk)
+# Test TypeScript Client SDK (@ppnsys/nalix-sdk 0.2.x, targets Nalix 14.4.1)
 cd clients/ts && npm test
 
 # Test generated TypeScript codecs

@@ -48,7 +48,7 @@ void send_control_packet(int socket_fd)
     control_init(&pkt);
 
     // Populate header fields
-    pkt.Header.Flags = 0x01;       // Reliable flag
+    pkt.Header.Flags = 0x80;       // SYSTEM flag
     pkt.Header.Priority = 0x02;    // QoS priority
     pkt.Header.SequenceId = 1001;
 

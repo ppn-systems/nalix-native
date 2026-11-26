@@ -6,7 +6,7 @@ import {
   ProtocolOpCode,
 } from '../src/index.js';
 
-test('Live WebSocket session to atmosos.eyc.asia:443 with handshake, ping, and timesync', async (t) => {
+test('Live WebSocket session to atmosos.eyc.asia:443 with handshake, ping, timesync and rekey', async (t) => {
   const session = new WebSocketSession('wss://atmosos.eyc.asia/ws/');
   assert.equal(session.state, ConnectivityState.IDLE);
 
@@ -39,7 +39,12 @@ test('Live WebSocket session to atmosos.eyc.asia:443 with handshake, ping, and t
   assert.ok(sync.rttMs >= 0, `SyncTime RTT should be non-negative: ${sync.rttMs}ms`);
   assert.ok(typeof sync.offsetMs === 'number', 'SyncTime offset should be a number');
 
-  // 4. Clean shutdown
+  // 4. Rekey: the key switches right after SESSION_REKEY is written, and frames after it use the new key.
+  await session.rekey(5000);
+  const pingAfterRekey = await session.ping(5000);
+  assert.ok(pingAfterRekey >= 0, `Ping after rekey should succeed: ${pingAfterRekey}ms`);
+
+  // 5. Clean shutdown
   stateSub.unsubscribe();
   session.close();
   assert.equal(session.state, ConnectivityState.SHUTDOWN);

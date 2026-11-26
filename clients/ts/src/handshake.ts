@@ -2,7 +2,8 @@ import { x25519 } from '@noble/curves/ed25519.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { Packet, PacketFlags, PacketPriority } from './packet.js';
-import { ControlType, ProtocolOpCode } from './protocol.js';
+import { ControlType, ProtocolOpCode, ProtocolReason } from './protocol.js';
+import { decodePowChallenge, encodePowProof, solvePowChallenge } from './pow.js';
 import { NalixStatus, StatusCode } from './status.js';
 import { ITransportSession } from './base.js';
 
@@ -135,7 +136,20 @@ export interface HandshakeResult {
 }
 
 /**
- * Performs client-side X25519 authenticated Diffie-Hellman handshake matching Nalix C# HandshakeExtensions.
+ * Performs client-side X25519 authenticated Diffie-Hellman handshake matching Nalix C# HandshakeExtensions
+ * (Nalix 14.4.1):
+ *
+ * 1. Resets both envelope sequence counters: a full handshake starts a new key and a new server-side session,
+ *    and the host restarts its counters when it installs the key (ppn-systems/nalix#545).
+ * 2. SESSION_INIT -> SESSION_CHALLENGE. When the host answers with SYSTEM_CONTROL ERROR / POW_REQUIRED, the
+ *    client runs the proof-of-work exchange (POW_REQUEST -> POW_CHALLENGE, solve, POW_PROOF) and re-sends
+ *    SESSION_INIT.
+ * 3. Fetches the server static key over TOFU (PUBLIC_KEY_REQUEST -> SESSION_TOFU) when none is pinned.
+ * 4. Verifies the server proof, sends SESSION_PROOF and verifies SESSION_ESTABLISHED.
+ *
+ * Every handshake frame is sent in plaintext. `timeoutMs` (default `connectTimeoutMs`) bounds the whole
+ * exchange, including the proof-of-work solve. Hosts close connections that do not authenticate within
+ * their handshake timeout (ppn-systems/nalix#486), so call this right after connect().
  */
 export async function performHandshake(
   session: ITransportSession,
@@ -149,136 +163,214 @@ export async function performHandshake(
   const allowTofu = options?.allowTofu ?? session.config.allowTofu;
   let pinnedServerKey = options?.serverPublicKey ?? session.config.serverPublicKey;
 
-  // 1. Fetch Server Static Public Key via TOFU if not pinned (matching C# HandshakeExtensions)
-  if (!pinnedServerKey) {
-    if (!allowTofu) {
-      throw new NalixStatus(StatusCode.PERMISSION_DENIED, 'ServerPublicKey is required when AllowTofu is disabled');
+  if (!pinnedServerKey && !allowTofu) {
+    throw new NalixStatus(StatusCode.PERMISSION_DENIED, 'ServerPublicKey is required when AllowTofu is disabled');
+  }
+
+  const deadline = performance.now() + timeoutMs;
+  const remaining = (): number => {
+    const left = Math.floor(deadline - performance.now());
+    if (left <= 0) {
+      throw new NalixStatus(StatusCode.DEADLINE_EXCEEDED, `Handshake did not complete within ${timeoutMs}ms`);
     }
-
-    const tofuReq = new Uint8Array(3);
-    const view = new DataView(tofuReq.buffer);
-    view.setUint16(0, 0, true); // Reason = NONE
-    tofuReq[2] = ControlType.PUBLIC_KEY_REQUEST; // 0x16
-
-    const tofuPacket = await session.request(
-      Packet.create(ProtocolOpCode.SYSTEM_CONTROL, tofuReq, {
-        flags: PacketFlags.SYSTEM,
-        priority: PacketPriority.HIGH,
-      }),
-      {
-        timeoutMs,
-        predicate: (p) => p.header.opcode === ProtocolOpCode.SESSION_TOFU,
-      }
-    );
-
-    if (tofuPacket.payload.length < 32) {
-      throw new NalixStatus(StatusCode.INVALID_ARGUMENT, 'Malformed SessionTofu payload: expected 32 bytes');
-    }
-
-    pinnedServerKey = tofuPacket.payload.slice(0, 32);
-  }
-
-  // 2. Generate client ephemeral keypair and 32-byte client nonce
-  const clientKey = x25519.keygen();
-  const clientNonce = new Uint8Array(32);
-  crypto.getRandomValues(clientNonce);
-
-  // 3. Build SessionInit payload (OpCode: 0x0000, 64 bytes: clientPublicKey[32] + clientNonce[32])
-  const initPayload = new Uint8Array(64);
-  initPayload.set(clientKey.publicKey, 0);
-  initPayload.set(clientNonce, 32);
-  const initPacket = Packet.create(ProtocolOpCode.SESSION_INIT, initPayload, {
-    flags: PacketFlags.SYSTEM,
-    priority: PacketPriority.URGENT,
-  });
-
-  // 4. Send SessionInit and await SessionChallenge (OpCode: 0x0006)
-  const challengePacket = await session.request(initPacket, {
-    timeoutMs,
-    predicate: (p) => p.header.opcode === ProtocolOpCode.SESSION_CHALLENGE,
-  });
-
-  if (challengePacket.payload.length < 96) {
-    throw new NalixStatus(StatusCode.INVALID_ARGUMENT, 'Malformed SessionChallenge payload: expected 96 bytes');
-  }
-
-  const serverEphemeralKey = challengePacket.payload.slice(0, 32);
-  const serverNonce = challengePacket.payload.slice(32, 64);
-  const serverProof = challengePacket.payload.slice(64, 96);
-
-  // 5. Diffie-Hellman Key Agreement:
-  // sharedSecretEE = X25519(clientPrivateKey, serverEphemeralKey)
-  // sharedSecretSE = X25519(clientPrivateKey, pinnedServerKey)
-  const sharedSecretEE = x25519.getSharedSecret(clientKey.secretKey, serverEphemeralKey);
-  const sharedSecretSE = x25519.getSharedSecret(clientKey.secretKey, pinnedServerKey);
-
-  // 6. Compute Master Secret & Transcript Hash
-  const masterSecret = HandshakeX25519.computeMasterSecret(sharedSecretEE, sharedSecretSE);
-  const transcriptHash = HandshakeX25519.computeTranscriptHash(
-    clientKey.publicKey,
-    clientNonce,
-    serverEphemeralKey,
-    serverNonce
-  );
-
-  // 7. Verify Server Proof (MitM Protection)
-  const expectedServerProof = HandshakeX25519.computeServerProof(masterSecret, transcriptHash);
-  if (!compareBytes(serverProof, expectedServerProof)) {
-    throw new NalixStatus(
-      StatusCode.UNAUTHENTICATED,
-      'SessionChallenge proof is invalid. Possible Man-in-the-Middle attack.'
-    );
-  }
-
-  // 8. Derive Session Key
-  const sessionKey = HandshakeX25519.deriveSessionKey(masterSecret, clientNonce, serverNonce, transcriptHash);
-
-  // 9. Set secret for inbound decryption of SessionEstablished, but keep outbound encryption disabled
-  // for SessionProof (matching Nalix C# where SessionProof is sent unencrypted).
-  session.sessionState.secret = sessionKey;
-  session.sessionState.encryptionEnabled = false;
-
-  // 10. Send SessionProof (OpCode: 0x0003, 32 bytes client proof) unencrypted and await SessionEstablished (OpCode: 0x0007)
-  const clientProof = HandshakeX25519.computeClientProof(masterSecret, transcriptHash);
-  const proofPacket = Packet.create(ProtocolOpCode.SESSION_PROOF, clientProof, {
-    flags: PacketFlags.SYSTEM,
-    priority: PacketPriority.HIGH,
-  });
-
-  const establishedPacket = await session.request(proofPacket, {
-    timeoutMs,
-    predicate: (p) => p.header.opcode === ProtocolOpCode.SESSION_ESTABLISHED,
-  });
-
-  if (establishedPacket.payload.length < 40) {
-    throw new NalixStatus(StatusCode.INVALID_ARGUMENT, 'Malformed SessionEstablished payload: expected 40 bytes');
-  }
-
-  const serverFinishProof = establishedPacket.payload.slice(0, 32);
-  const view = new DataView(
-    establishedPacket.payload.buffer,
-    establishedPacket.payload.byteOffset,
-    establishedPacket.payload.byteLength
-  );
-  const sessionToken = view.getBigUint64(32, true);
-
-  // 11. Verify Server Finish Proof
-  const expectedFinishProof = HandshakeX25519.computeServerFinishProof(masterSecret, transcriptHash);
-  if (!compareBytes(serverFinishProof, expectedFinishProof)) {
-    session.disableEncryption();
-    throw new NalixStatus(StatusCode.UNAUTHENTICATED, 'SessionEstablished proof is invalid');
-  }
-
-  // 12. Finalize Session State
-  session.sessionState.sessionToken = sessionToken;
-  session.sessionState.encryptionEnabled = true;
-
-  return {
-    sessionKey,
-    sessionToken,
-    serverPublicKey: pinnedServerKey,
-    serverStaticKey: pinnedServerKey,
+    return left;
   };
+
+  const state = session.sessionState;
+
+  // A new key is about to be negotiated: drop the previous one and restart both sequence directions.
+  state.secret = null;
+  state.encryptionEnabled = false;
+  state.sessionToken = 0n;
+  state.resetSequenceCounters();
+
+  try {
+    // 1. Generate client ephemeral keypair and 32-byte client nonce
+    const clientKey = x25519.keygen();
+    const clientNonce = new Uint8Array(32);
+    crypto.getRandomValues(clientNonce);
+
+    // SessionInit payload (OpCode 0x0000, 64 bytes: clientPublicKey[32] + clientNonce[32])
+    const initPayload = new Uint8Array(64);
+    initPayload.set(clientKey.publicKey, 0);
+    initPayload.set(clientNonce, 32);
+    const newInitPacket = () =>
+      Packet.create(ProtocolOpCode.SESSION_INIT, initPayload, {
+        flags: PacketFlags.SYSTEM,
+        priority: PacketPriority.URGENT,
+      });
+
+    // 2. SessionInit -> SessionChallenge, or ERROR/POW_REQUIRED when the host enforces proof-of-work.
+    let challengePacket = await session.request(newInitPacket(), {
+      timeoutMs: remaining(),
+      encrypt: false,
+      predicate: (p) => p.header.opcode === ProtocolOpCode.SESSION_CHALLENGE || isPowRequired(p),
+    });
+
+    if (isPowRequired(challengePacket)) {
+      const powChallengePacket = await session.request(
+        Packet.create(ProtocolOpCode.SYSTEM_CONTROL, controlPayload(ControlType.POW_REQUEST), {
+          flags: PacketFlags.SYSTEM,
+          priority: PacketPriority.HIGH,
+        }),
+        {
+          timeoutMs: remaining(),
+          encrypt: false,
+          predicate: (p) => p.header.opcode === ProtocolOpCode.POW_CHALLENGE,
+        }
+      );
+
+      const challenge = decodePowChallenge(powChallengePacket.payload);
+      const solution = await solvePowChallenge(challenge, deadline);
+
+      // The proof is pipelined: no reply, SessionInit follows immediately.
+      session.send(
+        Packet.create(ProtocolOpCode.POW_PROOF, encodePowProof(challenge, solution), {
+          flags: PacketFlags.SYSTEM,
+          priority: PacketPriority.URGENT,
+        }),
+        undefined,
+        { encrypt: false }
+      );
+
+      challengePacket = await session.request(newInitPacket(), {
+        timeoutMs: remaining(),
+        encrypt: false,
+        predicate: (p) => p.header.opcode === ProtocolOpCode.SESSION_CHALLENGE,
+      });
+    }
+
+    if (challengePacket.payload.length < 96) {
+      throw new NalixStatus(StatusCode.INVALID_ARGUMENT, 'Malformed SessionChallenge payload: expected 96 bytes');
+    }
+
+    const serverEphemeralKey = challengePacket.payload.slice(0, 32);
+    const serverNonce = challengePacket.payload.slice(32, 64);
+    const serverProof = challengePacket.payload.slice(64, 96);
+
+    // sharedSecretEE = X25519(clientPrivateKey, serverEphemeralKey)
+    const sharedSecretEE = x25519.getSharedSecret(clientKey.secretKey, serverEphemeralKey);
+    if (isAllZero(sharedSecretEE)) {
+      throw new NalixStatus(StatusCode.UNAUTHENTICATED, 'Handshake key agreement failed: Ephemeral shared secret is all zero.');
+    }
+
+    // 3. Fetch Server Static Public Key via TOFU if not pinned (same position as C# HandshakeExtensions)
+    if (!pinnedServerKey) {
+      const tofuPacket = await session.request(
+        Packet.create(ProtocolOpCode.SYSTEM_CONTROL, controlPayload(ControlType.PUBLIC_KEY_REQUEST), {
+          flags: PacketFlags.SYSTEM,
+          priority: PacketPriority.HIGH,
+        }),
+        {
+          timeoutMs: remaining(),
+          encrypt: false,
+          predicate: (p) => p.header.opcode === ProtocolOpCode.SESSION_TOFU,
+        }
+      );
+
+      if (tofuPacket.payload.length < 32) {
+        throw new NalixStatus(StatusCode.INVALID_ARGUMENT, 'Malformed SessionTofu payload: expected 32 bytes');
+      }
+      pinnedServerKey = tofuPacket.payload.slice(0, 32);
+    }
+
+    // sharedSecretSE = X25519(clientPrivateKey, pinnedServerKey)
+    const sharedSecretSE = x25519.getSharedSecret(clientKey.secretKey, pinnedServerKey);
+    if (isAllZero(sharedSecretSE)) {
+      throw new NalixStatus(StatusCode.UNAUTHENTICATED, 'Handshake key agreement failed: Static shared secret is all zero.');
+    }
+
+    // 4. Master Secret, Transcript Hash, server proof (MitM protection)
+    const masterSecret = HandshakeX25519.computeMasterSecret(sharedSecretEE, sharedSecretSE);
+    const transcriptHash = HandshakeX25519.computeTranscriptHash(
+      clientKey.publicKey,
+      clientNonce,
+      serverEphemeralKey,
+      serverNonce
+    );
+
+    const expectedServerProof = HandshakeX25519.computeServerProof(masterSecret, transcriptHash);
+    if (!compareBytes(serverProof, expectedServerProof)) {
+      throw new NalixStatus(
+        StatusCode.UNAUTHENTICATED,
+        'SessionChallenge proof is invalid. Possible Man-in-the-Middle attack.'
+      );
+    }
+
+    const sessionKey = HandshakeX25519.deriveSessionKey(masterSecret, clientNonce, serverNonce, transcriptHash);
+
+    // The host sends SessionEstablished encrypted with the new key; SessionProof itself goes out in plaintext.
+    state.secret = sessionKey;
+    state.encryptionEnabled = false;
+
+    const clientProof = HandshakeX25519.computeClientProof(masterSecret, transcriptHash);
+    const proofPacket = Packet.create(ProtocolOpCode.SESSION_PROOF, clientProof, {
+      flags: PacketFlags.SYSTEM,
+      priority: PacketPriority.HIGH,
+    });
+
+    const establishedPacket = await session.request(proofPacket, {
+      timeoutMs: remaining(),
+      encrypt: false,
+      predicate: (p) => p.header.opcode === ProtocolOpCode.SESSION_ESTABLISHED,
+    });
+
+    if (establishedPacket.payload.length < 40) {
+      throw new NalixStatus(StatusCode.INVALID_ARGUMENT, 'Malformed SessionEstablished payload: expected 40 bytes');
+    }
+
+    const serverFinishProof = establishedPacket.payload.slice(0, 32);
+    const view = new DataView(
+      establishedPacket.payload.buffer,
+      establishedPacket.payload.byteOffset,
+      establishedPacket.payload.byteLength
+    );
+    const sessionToken = view.getBigUint64(32, true);
+
+    const expectedFinishProof = HandshakeX25519.computeServerFinishProof(masterSecret, transcriptHash);
+    if (!compareBytes(serverFinishProof, expectedFinishProof)) {
+      throw new NalixStatus(StatusCode.UNAUTHENTICATED, 'SessionEstablished proof is invalid');
+    }
+
+    state.sessionToken = sessionToken;
+    state.encryptionEnabled = true;
+
+    return {
+      sessionKey,
+      sessionToken,
+      serverPublicKey: pinnedServerKey,
+      serverStaticKey: pinnedServerKey,
+    };
+  } catch (err) {
+    // A failed handshake leaves no half-installed key behind (matches the C# SDK).
+    state.secret = null;
+    state.encryptionEnabled = false;
+    state.sessionToken = 0n;
+    state.resetSequenceCounters();
+    throw err;
+  }
+}
+
+/** SYSTEM_CONTROL payload: Reason (uint16 LE) + Type (uint8). */
+function controlPayload(type: ControlType, reason: ProtocolReason = ProtocolReason.NONE): Uint8Array {
+  const payload = new Uint8Array(3);
+  new DataView(payload.buffer).setUint16(0, reason, true);
+  payload[2] = type;
+  return payload;
+}
+
+function isPowRequired(p: Packet): boolean {
+  if (p.header.opcode !== ProtocolOpCode.SYSTEM_CONTROL || p.payload.length < 3) {
+    return false;
+  }
+  const reason = p.payload[0] | (p.payload[1] << 8);
+  return p.payload[2] === ControlType.ERROR && reason === ProtocolReason.POW_REQUIRED;
+}
+
+function isAllZero(b: Uint8Array): boolean {
+  let acc = 0;
+  for (let i = 0; i < b.length; i++) acc |= b[i];
+  return acc === 0;
 }
 
 function compareBytes(a: Uint8Array, b: Uint8Array): boolean {

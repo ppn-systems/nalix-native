@@ -6,6 +6,8 @@ import { SessionState } from './state.js';
 import { Subscription, PacketCallback, StateCallback, ErrorCallback, SubscriptionManager } from './subscription.js';
 import { PendingRequestManager, RequestOptions } from './pending.js';
 import { FramePipeline } from './pipeline.js';
+import { STREAM_REPLAY_WINDOW } from './sequence.js';
+import { decodeDirective, directiveToStatus } from './directive.js';
 import { performHandshake, HandshakeOptions, HandshakeResult, HandshakeX25519 } from './handshake.js';
 import {
   resumeSession,
@@ -54,6 +56,7 @@ export interface ITransportSession {
   ping(timeoutMs?: number): Promise<number>;
   syncTime(timeoutMs?: number): Promise<{ rttMs: number; offsetMs: number }>;
 
+  resetSequenceCounters(): void;
   setSecret(secret: Uint8Array): void;
   enableEncryption(secret?: Uint8Array): void;
   disableEncryption(): void;
@@ -62,6 +65,7 @@ export interface ITransportSession {
   // Session Resumption and Transport Extensions matching C#
   resumeSession(options?: ResumeOptions): Promise<ProtocolReason>;
   connectWithResume(options?: ConnectWithResumeOptions): Promise<ConnectWithResumeResult>;
+  reconnectForResumeFallback(): Promise<void>;
   rekey(timeoutMs?: number): Promise<void>;
   disconnectGracefully(reason?: ProtocolReason): Promise<void>;
   sendControl(type: ControlType, reason?: ProtocolReason, sequenceId?: number): number;
@@ -80,7 +84,6 @@ export abstract class TransportSession implements ITransportSession {
   protected readonly _subscriptions: SubscriptionManager = new SubscriptionManager();
   protected readonly _pendingRequests: PendingRequestManager = new PendingRequestManager();
   private _sequenceCounter: number = 0;
-  private _outboundSeq32: number = 0;
 
   constructor(config: ChannelConfig, sessionState?: SessionState) {
     this.config = config;
@@ -117,14 +120,20 @@ export abstract class TransportSession implements ITransportSession {
   }
 
   /**
-   * Generates a 32-bit sequence number (1..4294967295) for AEAD envelope headers.
+   * Issues the next 32-bit envelope sequence number (1..4294967295) for an encrypted frame.
+   * Throws RESOURCE_EXHAUSTED instead of wrapping; rekey() resets the counter.
    */
   public nextSeq32(): number {
-    this._outboundSeq32 = (this._outboundSeq32 + 1) >>> 0;
-    if (this._outboundSeq32 === 0) {
-      this._outboundSeq32 = 1;
-    }
-    return this._outboundSeq32;
+    return this._sessionState.sendSequence.next();
+  }
+
+  /**
+   * Restarts the send and receive envelope sequence counters at 0.
+   * Matches ITransportSession.ResetSequenceCounters in the C# SDK. The SDK calls this itself at the start of a
+   * full handshake and when a rekey switches keys; connect() and resume keep the counters.
+   */
+  public resetSequenceCounters(): void {
+    this._sessionState.resetSequenceCounters();
   }
 
   public setSecret(secret: Uint8Array): void {
@@ -185,6 +194,24 @@ export abstract class TransportSession implements ITransportSession {
    * Dispatches an inbound packet through the pending request table, OpCode subscribers, and global listeners.
    */
   protected dispatchInboundPacket(packet: Packet): void {
+    // 0. A FAIL directive answers a request the host rejected (for example RATE_LIMITED when its pending
+    //    budget is full, ppn-systems/nalix#520). It echoes the request's sequence ID and carries the request
+    //    opcode in Arg0: fail that request now instead of letting it run into its timeout.
+    if (packet.header.opcode === ProtocolOpCode.SYSTEM_DIRECTIVE) {
+      try {
+        const directive = decodeDirective(packet);
+        if (
+          directive.type === ControlType.FAIL &&
+          directive.sequenceId !== 0 &&
+          this._pendingRequests.rejectFor(directive.sequenceId, directive.arg0 & 0xffff, directiveToStatus(directive))
+        ) {
+          return;
+        }
+      } catch {
+        // Malformed directive: let subscribers see the raw frame.
+      }
+    }
+
     // 1. Try to resolve any correlated pending request waiter
     if (this._pendingRequests.tryResolve(packet)) {
       return;
@@ -192,6 +219,66 @@ export abstract class TransportSession implements ITransportSession {
 
     // 2. Dispatch to subscribers
     this._subscriptions.dispatchPacket(packet);
+  }
+
+  /**
+   * Decodes one inbound transport message, runs the inbound pipeline (decrypt, decompress), applies the
+   * replay window to encrypted frames and dispatches the result. Concrete transports call this for every
+   * binary message they receive.
+   */
+  protected handleInboundFrame(buffer: Uint8Array): void {
+    let rawPacket: Packet | undefined;
+    let packet: Packet;
+    let seq: number | undefined;
+    try {
+      if (buffer.length > this.config.maxMessageSize) {
+        throw new NalixStatus(
+          StatusCode.RESOURCE_EXHAUSTED,
+          `Inbound frame of ${buffer.length} bytes exceeds maxMessageSize ${this.config.maxMessageSize}`
+        );
+      }
+      rawPacket = Packet.decode(buffer);
+      ({ packet, seq } = FramePipeline.processInboundWithSeq(rawPacket, this._sessionState));
+    } catch (err: unknown) {
+      this.reportInboundFailure(err, rawPacket);
+      return;
+    }
+
+    // Replay protection, as the C# SDK's frame readers and the host do: an encrypted frame must carry a
+    // sequence number newer than the last accepted one, or an unseen one inside the 32-slot window.
+    const counter = this._sessionState.receiveSequence;
+    if (!counter.isValid(seq, STREAM_REPLAY_WINDOW)) {
+      // Dropped without touching pending requests: a replayed frame must not be able to fail a live request.
+      this._subscriptions.dispatchError(
+        new NalixStatus(
+          StatusCode.ALREADY_EXISTS,
+          `Replayed or stale frame dropped (opcode 0x${packet.header.opcode.toString(16)}, seq ${seq}, last accepted ${counter.current})`,
+          { reason: ProtocolReason.REPLAY_DETECTED }
+        )
+      );
+      return;
+    }
+    if (seq !== undefined) {
+      counter.updateTo(seq);
+    }
+
+    this.dispatchInboundPacket(packet);
+  }
+
+  /**
+   * Surfaces an inbound frame that could not be decoded.
+   * If the frame header was parsed, its sequence ID is used to reject the matching pending request,
+   * so the caller gets the real failure instead of DEADLINE_EXCEEDED. The error is also emitted via onError().
+   */
+  protected reportInboundFailure(err: unknown, packet: Packet | undefined): void {
+    const status =
+      err instanceof NalixStatus
+        ? err
+        : new NalixStatus(StatusCode.DATA_LOSS, `Inbound frame rejected: ${(err as Error)?.message ?? String(err)}`);
+    if (packet) {
+      this._pendingRequests.cancel(packet.header.sequenceId, status);
+    }
+    this._subscriptions.dispatchError(status);
   }
 
   public abstract connect(): Promise<void>;
@@ -413,18 +500,38 @@ export abstract class TransportSession implements ITransportSession {
   }
 
   /**
+   * Replaces the transport connection with a fresh one before connectWithResume() falls back to a full
+   * handshake. Matches TransportSession.ReconnectForResumeFallbackAsync in the C# SDK. The default closes and
+   * reopens; transports override it to swap the socket without the intentional-disconnect side effects.
+   */
+  public async reconnectForResumeFallback(): Promise<void> {
+    if (this.isConnected) {
+      await this.disconnect();
+    }
+    await this.connect();
+  }
+
+  /**
    * Rotates session encryption keys mid-session using HKDF ratcheting.
-   * Matches Nalix C# RekeyExtensions.RekeyAsync.
+   * Matches Nalix C# RekeyExtensions.RekeyAsync (Nalix 14.4.1, ppn-systems/nalix#510):
+   *
+   * - SESSION_REKEY is sent under the current key. Right after it is written the client switches to the new key
+   *   and resets both sequence counters, before any later frame is encrypted. The host does the same when it
+   *   reads the request, so every later frame uses the new key on both sides (the host sends the ACK in plaintext).
+   * - If the frame could not be sent, nothing changes.
+   * - If the ACK is late or lost, the new key is kept: WebSocket is ordered, the host has already switched, and
+   *   going back would leave the two sides on different keys. The returned promise still rejects.
    */
   public async rekey(timeoutMs: number = 5000): Promise<void> {
     if (!this.isConnected) {
       throw new NalixStatus(StatusCode.UNAVAILABLE, 'Session must be connected to perform rekey');
     }
-    if (!this._sessionState.secret) {
+    if (!this._sessionState.secret || !this._sessionState.encryptionEnabled) {
       throw new NalixStatus(StatusCode.FAILED_PRECONDITION, 'No active session secret to rotate');
     }
 
-    const newKey = HandshakeX25519.deriveRekeySecret(this._sessionState.secret);
+    const previousKey = this._sessionState.secret;
+    const newKey = HandshakeX25519.deriveRekeySecret(previousKey);
     const seqId = this.nextSequenceId();
 
     const payload = new Uint8Array(3);
@@ -438,17 +545,40 @@ export abstract class TransportSession implements ITransportSession {
       sequenceId: seqId,
     });
 
-    await this.request(rekeyPacket, {
-      timeoutMs,
-      sequenceId: seqId,
-      predicate: (incoming) =>
-        incoming.header.opcode === ProtocolOpCode.SYSTEM_CONTROL &&
-        incoming.payload.length >= 3 &&
-        incoming.payload[2] === ControlType.SESSION_REKEY_ACK &&
-        incoming.header.sequenceId === seqId,
-    });
+    // Encrypted under the current key (the host refuses a plaintext rekey).
+    const processed = FramePipeline.processOutbound(
+      rekeyPacket,
+      this.config,
+      this._sessionState,
+      () => this.nextSequenceId(),
+      () => this.nextSeq32(),
+      true
+    );
+    const bytes = processed.encode();
 
+    const ack = this._pendingRequests.register(seqId, ProtocolOpCode.SYSTEM_CONTROL, timeoutMs, (incoming) =>
+      incoming.header.opcode === ProtocolOpCode.SYSTEM_CONTROL &&
+      incoming.payload.length >= 3 &&
+      incoming.payload[2] === ControlType.SESSION_REKEY_ACK &&
+      incoming.header.sequenceId === seqId
+    );
+
+    try {
+      this.sendRawFrame(bytes);
+    } catch (err: any) {
+      // SESSION_REKEY never left: the host still uses the current key.
+      const status =
+        err instanceof NalixStatus ? err : new NalixStatus(StatusCode.INTERNAL, err?.message ?? 'Failed to send SESSION_REKEY');
+      this._pendingRequests.cancel(seqId, status);
+      ack.catch(() => {});
+      throw status;
+    }
+
+    // Switch synchronously, before any other frame can be encrypted.
     this._sessionState.secret = newKey;
+    this._sessionState.resetSequenceCounters();
+
+    await ack;
   }
 
   /**

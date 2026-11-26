@@ -169,14 +169,19 @@ export async function resumeSession(
       if (err.code === StatusCode.CANCELLED) {
         return ProtocolReason.CANCELLED;
       }
+      if (err.code === StatusCode.UNAVAILABLE) {
+        return ProtocolReason.NETWORK_ERROR;
+      }
     }
     throw err;
   }
 }
 
 /**
- * Connects the session, tries resume when configured and possible, and falls back to full handshake when allowed.
- * Matches Nalix.SDK.Transport.Extensions.ResumeExtensions.ConnectWithResumeDetailedAsync.
+ * Connects and attempts session resume, falling back to a full handshake when allowed.
+ * Matches Nalix C# ResumeExtensions.ConnectWithResumeAsync (Nalix 14.4.1): the host ends the connection after
+ * it rejects a resume, so the fallback handshake always runs on a fresh transport
+ * (ITransportSession.reconnectForResumeFallback), never on the connection the resume was rejected on.
  */
 export async function connectWithResume(
   session: ITransportSession,
@@ -198,24 +203,20 @@ export async function connectWithResume(
       if (reason === ProtocolReason.NONE) {
         return { resumed: true, reason: ProtocolReason.NONE };
       }
-
-      if (!session.config.resumeFallbackToHandshake) {
-        throw new NalixStatus(StatusCode.UNAVAILABLE, `Session resume failed: ${ProtocolReason[reason] || reason}`);
-      }
-
-      // Reconnect if connection was closed by server upon resume rejection
-      if (!session.isConnected) {
-        await session.connect();
-      }
     } catch (err) {
       if (!session.config.resumeFallbackToHandshake) {
         throw err;
       }
       reason = ProtocolReason.NETWORK_ERROR;
-      if (!session.isConnected) {
-        await session.connect();
-      }
     }
+
+    if (!session.config.resumeFallbackToHandshake) {
+      throw new NalixStatus(StatusCode.UNAVAILABLE, `Session resume failed: ${ProtocolReason[reason] || reason}`, {
+        reason,
+      });
+    }
+
+    await session.reconnectForResumeFallback();
   }
 
   // Fallback to fresh full Handshake
