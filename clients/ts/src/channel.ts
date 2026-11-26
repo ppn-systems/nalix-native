@@ -36,6 +36,11 @@ export interface ChannelConfigOptions {
   resumeEnabled?: boolean;
   resumeTimeoutMs?: number;
   resumeFallbackToHandshake?: boolean;
+  /**
+   * When auto-reconnect reopens the transport of a session that was authenticated, run connectWithResume()
+   * (resume, or a full handshake as fallback) before the session counts as recovered. Default true.
+   */
+  resumeOnReconnect?: boolean;
 }
 
 export class ChannelConfig {
@@ -59,6 +64,7 @@ export class ChannelConfig {
   public readonly resumeEnabled: boolean;
   public readonly resumeTimeoutMs: number;
   public readonly resumeFallbackToHandshake: boolean;
+  public readonly resumeOnReconnect: boolean;
   private readonly _overrideUrl?: string;
 
   constructor(options: ChannelConfigOptions | string) {
@@ -92,6 +98,7 @@ export class ChannelConfig {
       this.resumeEnabled = true;
       this.resumeTimeoutMs = 3000;
       this.resumeFallbackToHandshake = true;
+      this.resumeOnReconnect = true;
     } else {
       if (options.url) {
         this._overrideUrl = options.url;
@@ -130,6 +137,7 @@ export class ChannelConfig {
       this.resumeEnabled = options.resumeEnabled ?? true;
       this.resumeTimeoutMs = options.resumeTimeoutMs ?? 3000;
       this.resumeFallbackToHandshake = options.resumeFallbackToHandshake ?? true;
+      this.resumeOnReconnect = options.resumeOnReconnect ?? true;
     }
   }
 

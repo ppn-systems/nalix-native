@@ -1,5 +1,6 @@
 import { Packet } from './packet.js';
 import { NalixStatus, StatusCode } from './status.js';
+import { ProtocolOpCode } from './protocol.js';
 
 export interface RequestOptions {
   timeoutMs?: number;
@@ -61,6 +62,11 @@ export class PendingRequestManager {
           if (predicate) {
             return predicate(incoming);
           }
+          // A SYSTEM_DIRECTIVE echoing the sequence ID is a verdict on the request, not its reply;
+          // FAIL directives are handled before this matcher runs.
+          if (incoming.header.opcode === ProtocolOpCode.SYSTEM_DIRECTIVE && opcode !== ProtocolOpCode.SYSTEM_DIRECTIVE) {
+            return false;
+          }
           return incoming.header.sequenceId === sequenceId;
         },
         resolve: (pkt: Packet) => {
@@ -102,6 +108,20 @@ export class PendingRequestManager {
       if (waiter.sequenceId === sequenceId) {
         clearTimeout(waiter.timer);
         this._waiters.delete(waiter);
+        waiter.reject(status);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Rejects the pending request sent with `sequenceId` and `opcode`, if any.
+   * Used for server FAIL directives, which echo the request's sequence ID and carry its opcode in Arg0.
+   */
+  public rejectFor(sequenceId: number, opcode: number, status: NalixStatus): boolean {
+    for (const waiter of this._waiters) {
+      if (waiter.sequenceId === sequenceId && waiter.opcode === opcode) {
         waiter.reject(status);
         return true;
       }

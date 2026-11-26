@@ -42,17 +42,37 @@ export const StatusCodeNames: Record<StatusCode, string> = {
 };
 
 /**
+ * Protocol-level detail attached to a status when the server (or the transport) said why.
+ */
+export interface NalixStatusDetails {
+  /** Nalix ProtocolReason (uint16) reported by the server, when known. */
+  reason?: number;
+  /** Nalix ProtocolAdvice (uint8) from a SYSTEM_DIRECTIVE, when known. */
+  advice?: number;
+  /** True when the server flagged the failure as transient (ControlFlags.IS_TRANSIENT). */
+  transient?: boolean;
+  /** WebSocket close code (RFC 6455) when the status comes from a closed connection. */
+  closeCode?: number;
+  /** WebSocket close reason text when the status comes from a closed connection. */
+  closeReason?: string;
+}
+
+/**
  * Represents the outcome of a Nalix operation.
  */
 export class NalixStatus extends Error {
   public readonly code: StatusCode;
   public readonly codeName: string;
+  public readonly details?: NalixStatusDetails;
 
-  constructor(code: StatusCode, message: string = StatusCodeNames[code] ?? 'UNKNOWN') {
+  constructor(code: StatusCode, message: string = StatusCodeNames[code] ?? 'UNKNOWN', details?: NalixStatusDetails) {
     super(`${StatusCodeNames[code] ?? 'UNKNOWN'}: ${message}`);
     this.name = 'NalixStatus';
     this.code = code;
     this.codeName = StatusCodeNames[code] ?? 'UNKNOWN';
+    if (details) {
+      this.details = details;
+    }
   }
 
   public get isOk(): boolean {

@@ -16,6 +16,27 @@ export enum ProtocolOpCode {
   SESSION_REKEY = 0x0009,
   POW_CHALLENGE = 0x000A,
   POW_PROOF = 0x000B,
+  /** Requests (client) or carries (server) a datagram session ticket over an established stream session. Nalix 14.4.0+. */
+  DATAGRAM_TICKET = 0x000C,
+
+  // Extensions (0x00F1..0x00FF)
+  /** Server challenge sent on a tunnel data connection; answered with TUNNEL_PROOF. Nalix 14.4.0+. */
+  TUNNEL_CHALLENGE = 0x00F1,
+  /** Provider proof of possession of the tunnel token, answering TUNNEL_CHALLENGE. Nalix 14.4.0+. */
+  TUNNEL_PROOF = 0x00F2,
+  TUNNEL_REQUEST = 0x00F3,
+  TUNNEL_PROVIDE_ACK = 0x00F4,
+  TUNNEL_CONNECT_ACK = 0x00F5,
+  TUNNEL_READY = 0x00F6,
+  TUNNEL_PROVIDE = 0x00F7,
+  TUNNEL_CONNECT = 0x00F8,
+  TRAVERSAL_REFLECTOR_INIT = 0x00F9,
+  TRAVERSAL_REFLECTOR_ALLOCATED = 0x00FA,
+  TRAVERSAL_PEER_SIGNAL = 0x00FB,
+  TRAVERSAL_NAT_PROBE_ACK = 0x00FC,
+  TRAVERSAL_NAT_PROBE = 0x00FD,
+  RUNTIME_OBSERVATION = 0x00FE,
+  OBSERVABILITY_ACCESS = 0x00FF,
 }
 
 /**
@@ -57,8 +78,8 @@ export enum SessionResumeStage {
 }
 
 /**
- * Standard protocol reason codes for control and error packets.
- * Matches Nalix.Abstractions.Networking.Protocols.ProtocolReason.
+ * Standard protocol reason codes for control, directive and error packets (wire type: uint16).
+ * Matches Nalix.Abstractions.Networking.Protocols.ProtocolReason (Nalix 14.4.1).
  */
 export enum ProtocolReason {
   NONE = 0,
@@ -69,7 +90,6 @@ export enum ProtocolReason {
   DEPRECATED = 5,
   REQUEST_INVALID = 6,
   INTERNAL_ERROR = 7,
-
   TIMEOUT = 100,
   REMOTE_CLOSED = 101,
   LOCAL_CLOSED = 102,
@@ -78,21 +98,117 @@ export enum ProtocolReason {
   CONNECTION_RESET = 105,
   DNS_FAILURE = 106,
   MTU_VIOLATION = 107,
-
+  CONGESTION = 108,
+  KEEPALIVE_FAILED = 109,
+  PROTOCOL_ERROR = 150,
+  VERSION_UNSUPPORTED = 151,
+  FRAME_TOO_LARGE = 152,
+  MESSAGE_TOO_LARGE = 153,
+  UNEXPECTED_MESSAGE = 154,
+  MISSING_REQUIRED_FIELD = 155,
+  DUPLICATE_MESSAGE = 156,
   STATE_VIOLATION = 157,
   CRYPTO_UNSUPPORTED = 158,
   COMPRESSION_UNSUPPORTED = 159,
   OPERATION_UNSUPPORTED = 160,
   MALFORMED_PACKET = 161,
-
   UNAUTHENTICATED = 200,
   UNAUTHORIZED = 201,
   FORBIDDEN = 202,
+  ACCOUNT_LOCKED = 203,
+  ACCOUNT_SUSPENDED = 204,
+  BANNED = 205,
+  IP_BLOCKED = 206,
+  RATE_LIMITED = 207,
   TOKEN_EXPIRED = 208,
   TOKEN_REVOKED = 209,
-
+  DEVICE_UNTRUSTED = 210,
+  TLS_HANDSHAKE_FAILED = 260,
+  TLS_REQUIRED = 261,
+  TLS_CERT_INVALID = 262,
+  SIGNATURE_INVALID = 263,
+  CHECKSUM_FAILED = 264,
+  DECRYPTION_FAILED = 265,
+  REPLAY_DETECTED = 266,
+  NONCE_INVALID = 267,
+  POW_REQUIRED = 270,
+  POW_INVALID = 271,
+  SERVER_SHUTDOWN = 300,
+  SERVICE_UNAVAILABLE = 301,
+  MAINTENANCE = 302,
+  OVERLOADED = 303,
+  DEPENDENCY_FAILURE = 304,
+  DATABASE_UNAVAILABLE = 305,
+  CACHE_UNAVAILABLE = 306,
+  QUEUE_UNAVAILABLE = 307,
+  VALIDATION_FAILED = 350,
+  NOT_FOUND = 351,
+  ALREADY_EXISTS = 352,
+  PRECONDITION_FAILED = 353,
+  STATE_CONFLICT = 354,
+  UNSUPPORTED_MEDIA_TYPE = 355,
+  SERIALIZATION_FAILED = 356,
+  UNSUPPORTED_PACKET = 357,
+  TRANSFORM_FAILED = 358,
+  THROTTLED = 400,
+  SLOW_CONSUMER = 401,
+  CREDIT_EXHAUSTED = 402,
+  WINDOW_EXCEEDED = 403,
+  RESOURCE_LIMIT = 450,
+  MEMORY_EXHAUSTED = 451,
+  CONNECTION_LIMIT = 452,
+  FD_LIMIT = 453,
+  DISK_FULL = 454,
+  CPU_LIMIT = 455,
   CLIENT_QUIT = 500,
   ABORTED = 501,
+  IDLE_TIMEOUT = 502,
   LOCAL_POLICY = 503,
+  COMPRESSION_FAILED = 504,
   SESSION_NOT_FOUND = 550,
+  SESSION_EXPIRED = 551,
+  DUPLICATE_SESSION = 552,
+  KEY_ROTATION_REQUIRED = 553,
+  TIME_SKEW = 554,
+  LEADER_CHANGE = 600,
+  NOT_LEADER = 601,
+  CONSENSUS_UNAVAILABLE = 602,
+  STALE_READ = 603,
+  REDIRECT = 650,
+  MIGRATE = 651,
+  REGION_UNAVAILABLE = 652,
+  LEGAL_BLOCK = 700,
+  CONTENT_VIOLATION = 701,
+  AGE_RESTRICTED = 702,
+  INVALID_USERNAME = 703,
+  WEAK_PASSWORD = 704,
+  RESERVED_900 = 900,
+  RESERVED_901 = 901,
+}
+
+/**
+ * Client action a server recommends in a SYSTEM_DIRECTIVE (wire type: uint8).
+ * Matches Nalix.Abstractions.Networking.Protocols.ProtocolAdvice.
+ */
+export enum ProtocolAdvice {
+  NONE = 0,
+  RETRY = 1,
+  BACKOFF_RETRY = 2,
+  DO_NOT_RETRY = 3,
+  REAUTHENTICATE = 4,
+  SLOW_DOWN = 5,
+  RECONNECT = 6,
+  FIX_AND_RETRY = 7,
+}
+
+/**
+ * Bit flags carried by a SYSTEM_DIRECTIVE (wire type: uint8).
+ * Matches Nalix.Abstractions.Networking.Protocols.ControlFlags.
+ */
+export enum ControlFlags {
+  NONE = 0,
+  IS_TRANSIENT = 1 << 0,
+  IS_AUTHRELATED = 1 << 1,
+  HAS_REDIRECT = 1 << 2,
+  SLOW_DOWN = 1 << 3,
 }

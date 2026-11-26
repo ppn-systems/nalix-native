@@ -89,8 +89,17 @@ export class FramePipeline {
    * 2. Decompresses payload if COMPRESSED flag is set.
    */
   public static processInbound(packet: Packet, state: SessionState): Packet {
+    return FramePipeline.processInboundWithSeq(packet, state).packet;
+  }
+
+  /**
+   * Same as processInbound, and also returns the envelope sequence number of an encrypted frame
+   * (undefined for a plaintext frame) so the caller can run the replay check.
+   */
+  public static processInboundWithSeq(packet: Packet, state: SessionState): { packet: Packet; seq: number | undefined } {
     let payload = packet.payload;
     let flags = packet.header.flags;
+    let seq: number | undefined;
 
     // 1. Decryption (decrypt first)
     if ((flags & PacketFlags.ENCRYPTED) !== 0) {
@@ -101,6 +110,7 @@ export class FramePipeline {
       // Authenticate the frame header as received (ENCRYPTED flag still set).
       const res = FrameCipher.decrypt(payload, state.secret, FramePipeline.encodeHeader(packet));
       payload = res.plaintext;
+      seq = res.seq;
       flags &= ~PacketFlags.ENCRYPTED;
     }
 
@@ -112,7 +122,7 @@ export class FramePipeline {
 
     packet.header.flags = flags;
     packet.payload = payload;
-    return packet;
+    return { packet, seq };
   }
 
   /** Encodes the 6-byte frame header used as the trailing AAD component. */

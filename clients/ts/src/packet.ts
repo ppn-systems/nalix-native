@@ -11,8 +11,11 @@ export enum PacketFlags {
   COMPRESSED = 1 << 1,  // 0x02
   ENCRYPTED = 1 << 2,   // 0x04
   FRAGMENTED = 1 << 3,  // 0x08
+  /** @deprecated Removed from Nalix in 14.4.0 (the host never sets or reads it). Will be removed in a later SDK release. */
   RELIABLE = 1 << 4,    // 0x10
+  /** @deprecated Removed from Nalix in 14.4.0 (the host never sets or reads it). Will be removed in a later SDK release. */
   UNRELIABLE = 1 << 5,  // 0x20
+  /** @deprecated Removed from Nalix in 14.4.0 (the host never sets or reads it). Will be removed in a later SDK release. */
   ACKNOWLEDGED = 1 << 6,// 0x40
   SYSTEM = 1 << 7,      // 0x80
 }

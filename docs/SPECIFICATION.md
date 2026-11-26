@@ -23,7 +23,7 @@ A complete packet consists of a mandatory 6-byte header followed by zero or more
 | Offset (Bytes) | Field | Type | Size | Endianness | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `0..1` | `OpCode` | `uint16_t` / `u16` | 2 bytes | Little-Endian | Static packet type identifier. |
-| `2` | `Flags` | `uint8_t` / `u8` | 1 byte | - | Packet control flags (e.g., Reliable, System). |
+| `2` | `Flags` | `uint8_t` / `u8` | 1 byte | - | Packet control flags: `COMPRESSED` (0x02), `ENCRYPTED` (0x04), `FRAGMENTED` (0x08), `SYSTEM` (0x80). Nalix 14.4.0 removed `RELIABLE`, `UNRELIABLE` and `ACKNOWLEDGED`. |
 | `3` | `Priority` | `uint8_t` / `u8` | 1 byte | - | Packet QoS delivery priority. |
 | `4..5` | `SequenceId` | `uint16_t` / `u16` | 2 bytes | Little-Endian | Packet tracking sequence counter. |
 

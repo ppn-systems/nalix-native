@@ -20,6 +20,7 @@ import {
   hasResumeState,
   HandshakeX25519,
   SESSION_RESUME_PAYLOAD_SIZE,
+  SessionState,
 } from '../src/index.js';
 
 class MockResumeSession extends TransportSession {
@@ -266,9 +267,12 @@ test('Extensions: rekey rotates session secret with HKDF ratcheting', async () =
   // Rekey request was sent
   assert.equal(session.outboundFrames.length, 1);
   const outbound = session.outboundFrames[0];
-  // Post-handshake control frames are encrypted; decrypt with the current secret to check the body.
+  // SESSION_REKEY goes out under the OLD key; the client switches to the new key right after writing it.
   assert.notEqual(outbound.header.flags & PacketFlags.ENCRYPTED, 0, 'REKEY must be encrypted');
-  FramePipeline.processInbound(outbound, session.sessionState);
+  assert.deepEqual(session.sessionState.secret, expectedNewKey, 'key switches as soon as SESSION_REKEY is written');
+  const oldKeyState = new SessionState();
+  oldKeyState.secret = initialSecret;
+  FramePipeline.processInbound(outbound, oldKeyState);
   assert.equal(outbound.header.opcode, ProtocolOpCode.SYSTEM_CONTROL);
   assert.equal(outbound.payload[2], ControlType.SESSION_REKEY);
 
